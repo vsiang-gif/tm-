@@ -16,10 +16,15 @@ export function GuideHero() {
           违规词、IP、双面、满印的商品会自动跳过。留下的商品会经过灵图裁剪、抠图、套图，标题也会按规则清洗，最后保存到你电脑上。
         </p>
         <div className="flex flex-wrap gap-3">
-          <a href="/collector.user.js" className={buttonVariants({ size: 'lg' })}>
-            安装采集脚本
-          </a>
-          <a href="#steps" className={buttonVariants({ size: 'lg', variant: 'outline' })}>
+  <a
+  href="/collector.user.js"
+  target="_blank"
+  rel="noopener"
+  className={buttonVariants({ size: 'lg' })}
+  >
+  安装采集脚本
+  </a>
+  <a href="#steps" className={buttonVariants({ size: 'lg', variant: 'outline' })}>
             查看安装步骤
           </a>
         </div>
