@@ -1,19 +1,13 @@
-import { headers } from 'next/headers'
-import { redirect } from 'next/navigation'
-import { auth } from '@/lib/auth'
-import { AppHeader } from '@/components/app-header'
-import { PatternBoard } from '@/components/patterns/pattern-board'
+import { GuideHero } from '@/components/guide/guide-hero'
+import { InstallSteps } from '@/components/guide/install-steps'
+import { GuideFaq } from '@/components/guide/guide-faq'
 
-export default async function HomePage() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) redirect('/sign-in')
-
+export default function HomePage() {
   return (
-    <div className="min-h-svh">
-      <AppHeader email={session.user.email} />
-      <main className="mx-auto max-w-7xl px-4 py-8 md:px-6">
-        <PatternBoard />
-      </main>
-    </div>
+    <main className="mx-auto flex max-w-6xl flex-col gap-20 px-4 py-12 md:px-8 md:py-20">
+      <GuideHero />
+      <InstallSteps />
+      <GuideFaq />
+    </main>
   )
 }
