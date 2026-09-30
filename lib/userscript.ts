@@ -648,7 +648,21 @@ const COLLECTOR_BODY = String.raw`
       '<div data-k="stats" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px;color:' + C.dim + '"></div>' +
       '<div data-k="log" style="margin-top:6px;max-height:110px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;color:' + C.dim + '"></div>' +
     '</div>';
-  document.body.appendChild(host);
+  host.id = 'temu-lingtu-collector-panel';
+  // Temu re-renders <body> during hydration and drops foreign nodes, so mount on <html> and re-attach if removed.
+  function mountPanel() {
+    if (!host.isConnected) (document.documentElement || document.body).appendChild(host);
+    host.style.display = '';
+  }
+  mountPanel();
+  setInterval(function () { if (!host.isConnected) mountPanel(); }, 1500);
+  if (typeof GM_registerMenuCommand === 'function') {
+    GM_registerMenuCommand('显示采集面板', function () {
+      mountPanel();
+      host.style.right = '20px';
+      host.style.bottom = '20px';
+    });
+  }
   function $(k) { return host.querySelector('[data-k="' + k + '"]'); }
 
   function showTab(k) {
@@ -769,7 +783,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      3.0.0',
+    '// @version      3.0.1',
     '// @description  多国家采集 Temu 高销量黑色 T 恤图案，过滤违规词/双面/满印，进店继续采，灵图裁剪+抠图+套图，保存到电脑',
     '// @match        https://www.temu.com/*',
     '// @match        https://*.temu.com/*',
@@ -777,8 +791,10 @@ export function buildUserscript() {
     '// @grant        GM_download',
     '// @grant        GM_getValue',
     '// @grant        GM_setValue',
+    '// @grant        GM_registerMenuCommand',
     '// @connect      *',
     '// @run-at       document-idle',
+    '// @noframes',
     '// ==/UserScript==',
     '',
     body,
