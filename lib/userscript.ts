@@ -212,7 +212,7 @@ const COLLECTOR_BODY = String.raw`
 
   var DEFAULTS = {
     arkKey: '', arkModel: 'doubao-seed-2-0-pro',
-    minSales: 100, target: 60, maxPages: 5, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
+    minSales: 20, target: 60, maxPages: 5, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
     enterStore: true, storeCount: 3, storeTarget: 30,
     handoff: 'alt1', clickGap: 3, saveOriginal: false, aiCheck: true, aiVision: true,
     skipWords: DEFAULT_SKIP.join('，'), removeWords: DEFAULT_REMOVE.join('，'),
@@ -220,7 +220,8 @@ const COLLECTOR_BODY = String.raw`
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
   if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
-  if (cfg.v !== 6) { cfg.v = 6; cfg.aiCheck = true; cfg.saveOriginal = false; cfg.handoff = 'alt1'; }
+  if (cfg.v !== 6 && cfg.v !== 7) { cfg.v = 6; cfg.aiCheck = true; cfg.saveOriginal = false; cfg.handoff = 'alt1'; }
+  if (cfg.v === 6) { cfg.v = 7; if (cfg.minSales === 100) cfg.minSales = DEFAULTS.minSales; GM_setValue('cfg', cfg); }
   if (['alt1', 'click', 'mark'].indexOf(cfg.handoff) < 0) cfg.handoff = 'alt1';
   ['apiBase', 'appId', 'secret', 'crop', 'matting', 'dress', 'stanceId', 'backgroundId', 'dressAr', 'dressNum', 'lingtuTitle'].forEach(function (k) { delete cfg[k]; });
   var oldCountries = cfg.countries || {};
@@ -639,7 +640,13 @@ const COLLECTOR_BODY = String.raw`
       if (ctx.seen.has(x.goodsId)) return;
       ctx.seen.add(x.goodsId);
       fresh++;
-      if (!x.noMetric && x.salesCount < cfg.minSales) return;
+      if (!x.noMetric) ctx.maxSales = Math.max(ctx.maxSales || 0, x.salesCount);
+      if (!x.noMetric && x.salesCount < cfg.minSales) {
+        stats.skipped++;
+        ctx.lowSales = (ctx.lowSales || 0) + 1;
+        markCard(x.el, 'warn', '不采：' + x.salesText + '，低于最低销量 ' + cfg.minSales);
+        return;
+      }
       var hit = findHit(x.title, skipList);
       if (hit) { stats.skipped++; log('跳过 ' + x.goodsId + '：标题含「' + hit + '」'); markCard(x.el, 'bad', '不采：标题含「' + hit + '」'); return; }
       if (cfg.blackOnly && !cfg.pixelCheck && !BLACK_RE.test(x.title)) return;
@@ -693,6 +700,7 @@ const COLLECTOR_BODY = String.raw`
     }
     if (!running) queue.length = 0;
     while (pending()) await sleep(800);
+    if (ctx.lowSales) log(ctx.lowSales + ' 个商品销量低于 ' + cfg.minSales + '，没采（本页最高销量 ' + (ctx.maxSales || 0) + '）。想多采可以到「过滤」把「最低销量」调低', !ctx.saved);
     log(ctx.source + '完成：本次保存 ' + ctx.saved + ' 个' + (ctx.saved < ctx.target ? '（没有更多达标商品）' : ''));
   }
 
@@ -1032,7 +1040,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.0.0',
+    '// @version      6.1.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
