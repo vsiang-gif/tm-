@@ -44,7 +44,7 @@ export function PanelPreview() {
           <span className="flex-1 rounded-md bg-primary py-2 text-center text-sm text-primary-foreground">开始多国采集</span>
           <span className="flex-1 rounded-md border border-ink-foreground/15 py-2 text-center text-sm">只采当前页</span>
         </div>
-        <p className="text-xs opacity-60">任务 2/5：店铺 634418212 · 裁剪 → 抠图 → 套图</p>
+        <p className="text-xs opacity-60">任务 2/5：店铺 634418212 · 豆包审核 → 灵图采集并同步</p>
         <ul className="flex flex-col gap-1 font-mono text-xs opacity-60">
           {LOGS.map((l) => (
             <li key={l}>{l}</li>
