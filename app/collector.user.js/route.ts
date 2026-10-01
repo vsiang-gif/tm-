@@ -6,7 +6,7 @@ export function GET() {
   return new Response(buildUserscript(), {
     headers: {
       'Content-Type': 'text/javascript; charset=utf-8',
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': 'no-store, max-age=0',
     },
   })
 }
