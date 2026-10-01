@@ -211,7 +211,7 @@ const COLLECTOR_BODY = String.raw`
   var MALE_WORDS = ['男装', '男士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'masculina', 'pria', 'メンズ'];
 
   var DEFAULTS = {
-    apiBase: '', appId: '', secret: '', arkKey: '', arkModel: 'doubao-seed-1-6-250615',
+    apiBase: '', appId: '', secret: '', arkKey: '', arkModel: 'doubao-seed-2-0-pro',
     minSales: 100, target: 60, maxPages: 5, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
     enterStore: true, storeCount: 3, storeTarget: 30,
     saveOriginal: true, crop: true, matting: true, dress: false, stanceId: '', backgroundId: '', dressAr: '3:4', dressNum: 1,
@@ -220,6 +220,7 @@ const COLLECTOR_BODY = String.raw`
     sites: {}
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
+  if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
   var oldCountries = cfg.countries || {};
   cfg.sites = Object.assign({}, cfg.sites);
   SITES.forEach(function (s) {
