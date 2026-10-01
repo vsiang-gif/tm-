@@ -216,7 +216,9 @@ const COLLECTOR_BODY = String.raw`
     enterStore: false, storeCount: 3, storeTarget: 30,
     handoff: 'alt1', clickGap: 3, saveOriginal: false, aiCheck: true, aiVision: true,
     skipWords: DEFAULT_SKIP.join('，'), removeWords: DEFAULT_REMOVE.join('，'),
-    sites: {}, v: 6
+    sites: {}, v: 6,
+    imgDedupe: true, schedule: '', dailyCap: 0, restEvery: 30, restMin: 3, autoResume: true,
+    pushType: 'none', pushKey: '', beep: true, reportTime: '22:00'
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
   if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
@@ -234,13 +236,27 @@ const COLLECTOR_BODY = String.raw`
   delete cfg.countries;
   var done = new Set(GM_getValue('done', []));
   var records = GM_getValue('records', []);
+  // synced = actually sent to 灵图 (costs 灵豆) and must never be sent again; done also includes reviewed-and-skipped items.
+  var synced = new Set(GM_getValue('synced', null) || []);
+  if (GM_getValue('synced', null) == null) {
+    var skippedIds = {};
+    records.forEach(function (r) { if (r.status === '跳过') skippedIds[r.key || r.goodsId] = 1; });
+    done.forEach(function (k) { if (!skippedIds[k] && !skippedIds[String(k).replace(/^[a-z]+_/, '')]) synced.add(k); });
+    GM_setValue('synced', Array.from(synced));
+  }
+  var hashes = GM_getValue('hashes', []);
+  var lastProgress = Date.now(), waitingHuman = false, resting = false;
   var queue = [], working = 0, running = false;
-  var stats = { found: 0, candidates: 0, skipped: 0, saved: 0, failed: 0 };
+  var stats = { found: 0, candidates: 0, skipped: 0, saved: 0, failed: 0, dup: 0 };
   var skipList = [], removeList = [], femaleList = [], maleList = [];
 
   function save() { GM_setValue('cfg', cfg); }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function today() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function normTime(x) { var m = String(x || '').trim().match(/^(\d{1,2})[:：](\d{2})$/); return m && +m[1] < 24 && +m[2] < 60 ? pad(m[1]) + ':' + m[2] : ''; }
+  function toMin(hm) { var p = hm.split(':'); return +p[0] * 60 + +p[1]; }
+  function nowHM() { var d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function safe(s) { return String(s).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40); }
   function pending() { return queue.length + working; }
   function siteBy(id) { for (var i = 0; i < SITES.length; i++) if (SITES[i].id === id) return SITES[i]; return SITES[0]; }
@@ -447,6 +463,7 @@ const COLLECTOR_BODY = String.raw`
   }
   function isLtButton(el) {
     if (el === host || host.contains(el)) return false;
+    if (el.closest && el.closest('[data-collector-tag]')) return false;
     var t = (el.textContent || '').trim();
     if (t.length > 30 || !LT_BTN_RE.test(t)) return false;
     for (var c = el.firstElementChild; c; c = c.nextElementSibling) if (LT_BTN_RE.test(c.textContent || '')) return false;
@@ -528,6 +545,23 @@ const COLLECTOR_BODY = String.raw`
     tag.setAttribute('style', 'position:absolute;left:4px;bottom:4px;right:4px;z-index:5;padding:3px 6px;border-radius:4px;font:12px/1.4 system-ui,"Microsoft YaHei",sans-serif;color:#fff;pointer-events:none;background:' + color);
     tag.textContent = text;
   }
+  // 灵图 relabels its button to 「再次采集并同步」 once a product was synced, even from another browser.
+  var ALREADY_RE = /再次采集/;
+  function humanGap() { return sleep(cfg.clickGap * 1000 * (0.7 + Math.random() * 0.9)); }
+  async function maybeRest() {
+    if (!cfg.restEvery || !cfg.restMin) return;
+    var n = (GM_getValue('sinceRest', 0) || 0) + 1;
+    var limit = GM_getValue('restLimit', 0) || cfg.restEvery;
+    if (n < limit) { GM_setValue('sinceRest', n); return; }
+    GM_setValue('sinceRest', 0);
+    GM_setValue('restLimit', Math.max(3, Math.round(cfg.restEvery * (0.8 + Math.random() * 0.4))));
+    var ms = cfg.restMin * 60000 * (0.7 + Math.random() * 0.6);
+    resting = true; render();
+    log('已连续采集 ' + n + ' 张，休息 ' + (Math.round(ms / 6000) / 10) + ' 分钟（模拟人工，降低风控）');
+    var end = Date.now() + ms;
+    while (running && Date.now() < end) { await sleep(2000); lastProgress = Date.now(); }
+    resting = false; render();
+  }
   var handoffLock = Promise.resolve();
   function handoff(item) {
     var run = handoffLock.then(async function () {
@@ -535,28 +569,28 @@ const COLLECTOR_BODY = String.raw`
       if (!card) return { ok: false, note: '卡片已不在页面上' };
       if (cfg.handoff === 'mark') { markCard(card, 'ok', '审核通过，鼠标移上去按 Alt+1'); return { ok: true, note: '已标记，待手动 Alt+1' }; }
       card.scrollIntoView({ block: 'center', behavior: 'instant' });
-      await sleep(400);
-      if (cfg.handoff === 'alt1') {
-        for (var h = 0; h < 3; h++) { hover(card); await sleep(250); }
-        pressAlt1(card);
-        markCard(card, 'ok', '已按 Alt+1 采集并同步');
-        await sleep(cfg.clickGap * 1000 + Math.random() * 800);
-        return { ok: true, note: '已发送 Alt+1 采集并同步' };
+      await sleep(350 + Math.random() * 500);
+      var btn = null, tries = cfg.handoff === 'click' ? 8 : 3;
+      for (var t = 0; t < tries && !btn; t++) { hover(card); await sleep(250 + Math.random() * 200); btn = findLtButton(card); }
+      if (btn && ALREADY_RE.test(btn.textContent || '')) {
+        markCard(card, 'warn', '灵图显示已同步过，不重复采');
+        return { ok: false, already: true, note: '灵图按钮显示「再次采集」，已同步过' };
       }
-      var btn = null;
-      for (var t = 0; t < 8 && !btn; t++) { hover(card); await sleep(300); btn = findLtButton(card); }
-      if (btn) {
+      var note;
+      if (cfg.handoff === 'click' && btn) {
         var r = btn.getBoundingClientRect();
         fire(btn, ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], r.left + r.width / 2, r.top + r.height / 2);
         markCard(card, 'ok', '已交给灵图采集并同步');
-        await sleep(cfg.clickGap * 1000 + Math.random() * 800);
-        return { ok: true, note: '已点击灵图「采集并同步」' };
+        note = '已点击灵图「采集并同步」';
+      } else {
+        hover(card);
+        pressAlt1(card);
+        if (cfg.handoff === 'click') { markCard(card, 'warn', '没找到灵图按钮，已试 Alt+1，请确认'); note = '没找到灵图按钮，已发送 Alt+1，请到灵图核对'; }
+        else { markCard(card, 'ok', '已按 Alt+1 采集并同步'); note = '已发送 Alt+1 采集并同步'; }
       }
-      hover(card);
-      pressAlt1(card);
-      markCard(card, 'warn', '没找到灵图按钮，已试 Alt+1，请确认');
-      await sleep(cfg.clickGap * 1000);
-      return { ok: true, note: '没找到灵图按钮，已发送 Alt+1，请到灵图核对' };
+      await humanGap();
+      await maybeRest();
+      return { ok: true, note: note };
     });
     handoffLock = run.catch(function () {});
     return run;
@@ -591,22 +625,44 @@ const COLLECTOR_BODY = String.raw`
 
   // ---------- checks ----------
   // Share of near-black pixels in the torso area. Low = not a black shirt, or the print covers most of it.
-  async function darkRatio(url) {
+  // Also returns a 64-bit difference hash of the print area, so the same design from another seller is caught as a duplicate.
+  async function imageInfo(url) {
     var r = await gmRequest({ method: 'GET', url: url, responseType: 'blob' });
     if (r.status >= 400) throw new Error('图片 HTTP ' + r.status);
     var bmp = await createImageBitmap(r.response);
     var W = 160, H = 160, cv = document.createElement('canvas');
     cv.width = W; cv.height = H;
-    var g = cv.getContext('2d');
+    var g = cv.getContext('2d', { willReadFrequently: true });
     g.drawImage(bmp, 0, 0, W, H);
-    var d = g.getImageData(Math.round(W * 0.22), Math.round(H * 0.28), Math.round(W * 0.56), Math.round(H * 0.54)).data;
+    var x0 = Math.round(W * 0.22), y0 = Math.round(H * 0.28), w = Math.round(W * 0.56), h = Math.round(H * 0.54);
+    var d = g.getImageData(x0, y0, w, h).data;
     var dark = 0, n = 0;
     for (var i = 0; i < d.length; i += 4) {
       var mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
       n++;
       if (mx < 75 && mx - mn < 45) dark++;
     }
-    return dark / n;
+    var sc = document.createElement('canvas');
+    sc.width = 9; sc.height = 8;
+    var sg = sc.getContext('2d', { willReadFrequently: true });
+    sg.drawImage(cv, x0, y0, w, h, 0, 0, 9, 8);
+    var p = sg.getImageData(0, 0, 9, 8).data, bits = '', hex = '';
+    function gray(x, y) { var o = (y * 9 + x) * 4; return p[o] * 0.299 + p[o + 1] * 0.587 + p[o + 2] * 0.114; }
+    for (var y = 0; y < 8; y++) for (var x = 0; x < 8; x++) bits += gray(x, y) > gray(x + 1, y) ? '1' : '0';
+    for (var b = 0; b < 64; b += 4) hex += parseInt(bits.substr(b, 4), 2).toString(16);
+    return { dark: dark / n, hash: hex };
+  }
+  var POP = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
+  function bitsOf(h) { var c = 0; for (var i = 0; i < h.length; i++) c += POP[parseInt(h[i], 16)]; return c; }
+  function hamming(a, b) { var c = 0; for (var i = 0; i < 16; i++) c += POP[parseInt(a[i], 16) ^ parseInt(b[i], 16)]; return c; }
+  function similarSynced(hash) {
+    // Near-blank prints carry almost no signal and would all look alike, so don't judge those by image.
+    if (!hash || hash.length !== 16) return null;
+    var c = bitsOf(hash);
+    if (c < 8 || c > 56) return null;
+    hashes = GM_getValue('hashes', []);
+    for (var i = 0; i < hashes.length; i++) if (hamming(hash, hashes[i].h) <= 5) return hashes[i];
+    return null;
   }
   async function aiCheck(item) {
     var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件 T 恤的印花图案。商品标题：' + item.title +
@@ -621,27 +677,156 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- pipeline ----------
-  function markDone(item) { done.add(item.key); GM_setValue('done', Array.from(done)); }
+  // ---------- dedupe store (shared by every tab through GM storage; always merge, never overwrite) ----------
+  function refreshSets() {
+    GM_getValue('done', []).forEach(function (k) { done.add(k); });
+    GM_getValue('synced', []).forEach(function (k) { synced.add(k); });
+  }
+  function addKey(name, set, key) {
+    var arr = GM_getValue(name, []);
+    if (arr.indexOf(key) < 0) { arr.push(key); GM_setValue(name, arr); }
+    arr.forEach(function (k) { set.add(k); });
+  }
+  function removeKey(name, set, key) {
+    GM_setValue(name, GM_getValue(name, []).filter(function (k) { return k !== key; }));
+    set.delete(key);
+  }
+  function markDone(item) { addKey('done', done, item.key); }
+  function markSynced(item, hash) {
+    addKey('synced', synced, item.key);
+    markDone(item);
+    if (hash) { hashes = GM_getValue('hashes', []); hashes.push({ h: hash, k: item.key }); GM_setValue('hashes', hashes); }
+  }
+  function unmarkSynced(item) {
+    removeKey('synced', synced, item.key);
+    removeKey('done', done, item.key);
+    hashes = GM_getValue('hashes', []).filter(function (x) { return x.k !== item.key; });
+    GM_setValue('hashes', hashes);
+  }
+  function isKnown(key) { refreshSets(); return synced.has(key) || done.has(key); }
+  function pushRecord(rec) {
+    rec.time = new Date().toISOString();
+    records = GM_getValue('records', []);
+    records.push(rec);
+    if (records.length > 30000) records = records.slice(-30000);
+    GM_setValue('records', records);
+  }
+  function recOf(item, status, reason, extra) {
+    return Object.assign({ status: status, reason: reason, key: item.key, country: siteLabel(item.ctx.country), source: item.ctx.source, goodsId: item.goodsId, title: item.title, sales: item.salesText, salesCount: item.salesCount, productUrl: item.productUrl, imageUrl: item.imageUrl }, extra || {});
+  }
+
+  // ---------- daily stats / report ----------
+  function emptyDay() { return { saved: 0, skipped: 0, dup: 0, failed: 0, sites: {}, reasons: {} }; }
+  function dayStats(d) { return GM_getValue('daily', {})[d || today()] || emptyDay(); }
+  function reasonGroup(r) {
+    r = String(r || '');
+    return /违规/.test(r) ? '违规内容' : /IP|品牌/.test(r) ? 'IP/品牌' : /双面/.test(r) ? '双面印花' : /太满/.test(r) ? '印花太满' : /黑色|颜色/.test(r) ? '非黑色' : /标题含/.test(r) ? '跳过词' : '其他';
+  }
+  function bump(kind, site, reason) {
+    var all = GM_getValue('daily', {}), d = today(), s = Object.assign(emptyDay(), all[d]);
+    s[kind] = (s[kind] || 0) + 1;
+    if (kind === 'saved' && site) s.sites[site] = (s.sites[site] || 0) + 1;
+    if (kind === 'skipped' && reason) { var g = reasonGroup(reason); s.reasons[g] = (s.reasons[g] || 0) + 1; }
+    all[d] = s;
+    var keys = Object.keys(all).sort();
+    while (keys.length > 60) delete all[keys.shift()];
+    GM_setValue('daily', all);
+  }
+  function capReached() { return cfg.dailyCap > 0 && dayStats().saved >= cfg.dailyCap; }
+  function joinMap(m) { return Object.keys(m).map(function (k) { return k + ' ' + m[k]; }).join('、') || '无'; }
+  function reportText(d) {
+    var s = dayStats(d);
+    return ['日期：' + d,
+      '已采集并同步：' + s.saved + ' 张' + (cfg.dailyCap ? '（每日上限 ' + cfg.dailyCap + '）' : ''),
+      '去重拦截（没花灵豆）：' + s.dup + ' 张',
+      '审核跳过：' + s.skipped + ' 张',
+      '失败：' + s.failed,
+      '各站点：' + joinMap(s.sites),
+      '跳过原因：' + joinMap(s.reasons),
+      '去重库累计已同步：' + synced.size + ' 张'].join('\n');
+  }
+  function exportReport() {
+    var all = GM_getValue('daily', {});
+    var rows = [['日期', '已同步', '去重拦截', '审核跳过', '失败', '各站点', '跳过原因'].join(',')];
+    Object.keys(all).sort().reverse().forEach(function (d) {
+      var s = Object.assign(emptyDay(), all[d]);
+      rows.push([d, s.saved, s.dup, s.skipped, s.failed, joinMap(s.sites), joinMap(s.reasons)].map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(','));
+    });
+    var url = URL.createObjectURL(new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv' }));
+    GM_download({ url: url, name: '爆款图案/采集日报_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
+  }
+
+  // ---------- alerts: sound + desktop notification + WeChat push ----------
+  var lastAlert = {};
+  function beep() {
+    try {
+      var A = window.AudioContext || window.webkitAudioContext, ac = new A();
+      [0, 0.35, 0.7].forEach(function (t) {
+        var o = ac.createOscillator(), g = ac.createGain();
+        o.frequency.value = 880; g.gain.value = 0.15;
+        o.connect(g); g.connect(ac.destination);
+        o.start(ac.currentTime + t); o.stop(ac.currentTime + t + 0.2);
+      });
+      setTimeout(function () { ac.close(); }, 1500);
+    } catch (e) {}
+  }
+  async function push(title, body) {
+    if (cfg.pushType === 'none' || !cfg.pushKey) return false;
+    try {
+      var r;
+      if (cfg.pushType === 'serverchan') {
+        var m = cfg.pushKey.match(/^sctp(\d+)t/i);
+        var url = m ? 'https://' + m[1] + '.push.ft07.com/send/' + encodeURIComponent(cfg.pushKey) + '.send' : 'https://sctapi.ftqq.com/' + encodeURIComponent(cfg.pushKey) + '.send';
+        r = await gmRequest({ method: 'POST', url: url, headers: { 'content-type': 'application/x-www-form-urlencoded' }, data: 'title=' + encodeURIComponent(title) + '&desp=' + encodeURIComponent(body.replace(/\n/g, '\n\n')) });
+      } else {
+        r = await gmRequest({ method: 'POST', url: 'https://www.pushplus.plus/send', headers: { 'content-type': 'application/json' }, data: JSON.stringify({ token: cfg.pushKey, title: title, content: body, template: 'txt' }) });
+      }
+      if (r.status >= 400) { log('微信推送失败：HTTP ' + r.status, true); return false; }
+      return true;
+    } catch (e) { log('微信推送失败：' + e.message, true); return false; }
+  }
+  function notify(title, body, opts) {
+    opts = opts || {};
+    var now = Date.now();
+    if (!opts.force && lastAlert[title] && now - lastAlert[title] < 10 * 60000) return Promise.resolve(false);
+    lastAlert[title] = now;
+    if (cfg.beep && opts.sound !== false) beep();
+    try { if (typeof GM_notification === 'function') GM_notification({ title: title, text: String(body).slice(0, 220), timeout: 20000 }); } catch (e) {}
+    return push(title, body);
+  }
+
+  // ---------- pipeline ----------
   function markSkipped(item, reason) {
     markDone(item);
-    records.push({ status: '跳过', reason: reason, country: siteLabel(item.ctx.country), source: item.ctx.source, goodsId: item.goodsId, title: item.title, sales: item.salesText, salesCount: item.salesCount, productUrl: item.productUrl, imageUrl: item.imageUrl, time: new Date().toISOString() });
-    GM_setValue('records', records);
+    pushRecord(recOf(item, '跳过', reason));
     stats.skipped++;
+    bump('skipped', null, reason);
     log('跳过 ' + item.goodsId + '：' + reason);
     markCard(liveCard(item), 'bad', '不采：' + reason.slice(0, 40));
   }
+  function markDup(item, reason) {
+    markDone(item);
+    pushRecord(recOf(item, '重复不采', reason));
+    stats.dup++;
+    bump('dup');
+    log('去重 ' + item.goodsId + '：' + reason);
+    markCard(liveCard(item), 'warn', '重复不采：' + reason.slice(0, 36));
+  }
   async function processItem(item) {
     var ctx = item.ctx;
-    if (cfg.blackOnly && cfg.pixelCheck) {
-      try {
-        var ratio = await darkRatio(item.imageUrl);
-        if (ratio < cfg.darkMin / 100) { markSkipped(item, '非黑色或印花太满（黑色占比 ' + Math.round(ratio * 100) + '%）'); return false; }
-      } catch (e) { log('颜色检测失败，继续：' + e.message, true); }
+    if (isKnown(item.key)) { stats.dup++; markCard(liveCard(item), 'warn', '已处理过，不重复采'); return false; }
+    var info = null;
+    if (cfg.imgDedupe || (cfg.blackOnly && cfg.pixelCheck)) {
+      try { info = await imageInfo(item.imageUrl); } catch (e) { log('图片检测失败，继续：' + e.message, true); }
     }
+    var twin = info && cfg.imgDedupe ? similarSynced(info.hash) : null;
+    if (twin) { markDup(item, '图案和已同步的 ' + twin.k + ' 几乎一样'); return false; }
+    if (info && cfg.blackOnly && cfg.pixelCheck && info.dark < cfg.darkMin / 100) { markSkipped(item, '非黑色或印花太满（黑色占比 ' + Math.round(info.dark * 100) + '%）'); return false; }
     if (cfg.aiCheck) {
       var bad = await aiCheck(item);
       if (bad) { markSkipped(item, '豆包：' + bad); return false; }
     }
+    if (capReached()) { queue.length = 0; return false; }
 
     var clean = cleanTitle(item.title), files = [];
     if (cfg.saveOriginal) {
@@ -651,11 +836,17 @@ const COLLECTOR_BODY = String.raw`
       files.push(base + '_原图', base + '_标题.txt');
     }
 
+    // Claim the product before sending: a crash, reload or second tab can then never send it to 灵图 twice.
+    // If something throws mid-send the claim stays, losing at most one item instead of paying twice.
+    if (isKnown(item.key)) { stats.dup++; markCard(liveCard(item), 'warn', '其他标签页刚采过'); return false; }
+    twin = info && cfg.imgDedupe ? similarSynced(info.hash) : null;
+    if (twin) { markDup(item, '图案和已同步的 ' + twin.k + ' 几乎一样'); return false; }
+    markSynced(item, info && info.hash);
     var res = await handoff(item);
-    if (!res.ok) { stats.failed++; log('交给灵图失败 ' + item.goodsId + '：' + res.note, true); return false; }
-    markDone(item);
-    records.push({ status: cfg.handoff === 'mark' ? '已标记' : '已采集并同步', reason: res.note, country: siteLabel(ctx.country), source: ctx.source, goodsId: item.goodsId, title: item.title, cleanTitle: clean, sales: item.salesText, salesCount: item.salesCount, productUrl: item.productUrl, imageUrl: item.imageUrl, files: files.join(' | '), time: new Date().toISOString() });
-    GM_setValue('records', records);
+    if (res.already) { pushRecord(recOf(item, '灵图已同步过', res.note)); stats.dup++; bump('dup'); log('去重 ' + item.goodsId + '：' + res.note); return false; }
+    if (!res.ok) { unmarkSynced(item); stats.failed++; bump('failed'); log('交给灵图失败 ' + item.goodsId + '：' + res.note, true); return false; }
+    pushRecord(recOf(item, cfg.handoff === 'mark' ? '已标记' : '已采集并同步', res.note, { cleanTitle: clean, files: files.join(' | ') }));
+    bump('saved', siteLabel(ctx.country));
     return true;
   }
 
@@ -664,9 +855,16 @@ const COLLECTOR_BODY = String.raw`
     while (queue.length) {
       var item = queue.shift();
       try {
-        if (await processItem(item)) { stats.saved++; item.ctx.saved++; log('已保存 ' + item.goodsId + '（' + item.salesText + '）'); }
+        if (await processItem(item)) {
+          stats.saved++; item.ctx.saved++;
+          item.ctx.task.carry = item.ctx.saved;
+          if (item.ctx.job) setJob(item.ctx.job);
+          log('已保存 ' + item.goodsId + '（' + item.salesText + '）');
+        }
+        lastProgress = Date.now();
       } catch (e) {
         stats.failed++;
+        bump('failed');
         log('失败 ' + item.goodsId + '：' + e.message, true);
         if (/请先|豆包接口/.test(e.message)) { queue.length = 0; pause(); }
       }
@@ -702,7 +900,8 @@ const COLLECTOR_BODY = String.raw`
       x.black = BLACK_RE.test(x.title);
       ctx.candidates.push(x);
       stats.candidates++;
-      if (!done.has(x.key)) ctx.backlog.push(x);
+      if (!done.has(x.key) && !synced.has(x.key)) ctx.backlog.push(x);
+      else markCard(x.el, 'warn', '已处理过，不重复采');
     });
     ctx.backlog.sort(function (a, b) { return (b.black - a.black) || (b.salesCount - a.salesCount); });
     render();
@@ -757,7 +956,8 @@ const COLLECTOR_BODY = String.raw`
   }
   async function collectPage(ctx) {
     var idle = 0, t = ctx.task;
-    while (running && ctx.saved < ctx.target) {
+    refreshSets();
+    while (running && ctx.saved < ctx.target && !capReached()) {
       fill(ctx);
       if (ctx.backlog.length) { await sleep(800); continue; }
       if (idle >= 6) {
@@ -773,9 +973,9 @@ const COLLECTOR_BODY = String.raw`
         }
         break;
       }
-      if (scan(ctx) > 0) { idle = 0; continue; }
+      if (scan(ctx) > 0) { idle = 0; lastProgress = Date.now(); continue; }
       if (pending()) { await sleep(800); continue; }
-      if (findMore() && await clickMore()) { idle = 0; continue; }
+      if (findMore() && await clickMore()) { idle = 0; lastProgress = Date.now(); continue; }
       idle++;
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
       await sleep(1800 + Math.random() * 1500);
@@ -822,8 +1022,13 @@ const COLLECTOR_BODY = String.raw`
       return;
     }
     var optional = PLAT.metric === 'optional' || t.type === 'store';
-    if (!(await waitFor(function () { return extract(optional).length > 0; }, 15000))) {
+    if (!(await waitFor(function () { return extract(optional).length > 0; }, 15000)) && cfg.autoResume) {
+      var ok = await waitHuman(t, job, '「' + taskLabel(t) + '」没识别到商品：可能要登录或出现了验证码', function () { return extract(optional).length > 0; });
+      if (!running) return;
+      if (!ok) { log('等了 30 分钟没处理，跳过「' + taskLabel(t) + '」', true); return; }
+    } else if (!extract(optional).length) {
       t.empty = (t.empty || 0) + 1;
+      notify('采集需要人工处理', taskLabel(t) + '：没识别到商品，可能要登录或出现了验证码');
       if (t.empty === 1) { log('「' + taskLabel(t) + '」没识别到商品：可能要先登录，或出现了验证码。在页面上处理好后点「继续」', true); running = false; return; }
       log('仍然没识别到商品，跳过「' + taskLabel(t) + '」', true);
       return;
@@ -861,9 +1066,10 @@ const COLLECTOR_BODY = String.raw`
     var job = getJob();
     if (job && job.v !== JOB_VERSION) { setJob(null); job = null; }
     if (!job || job.paused) { render(); return; }
-    running = true; render();
+    running = true; lastProgress = Date.now(); render();
     while (job.idx < job.tasks.length) {
       var t = job.tasks[job.idx];
+      if (capReached()) { finishJob('今日已同步 ' + dayStats().saved + ' 张，达到每日上限 ' + cfg.dailyCap); return; }
       if (!onTaskPage(t)) {
         t.tries = (t.tries || 0) + 1;
         if (t.tries > 3) { log('打不开「' + taskLabel(t) + '」，跳过', true); job.idx++; setJob(job); continue; }
@@ -878,6 +1084,16 @@ const COLLECTOR_BODY = String.raw`
         var wrong = temuRegionMismatch(t.site);
         if (wrong) {
           var realName = siteBy('temu-' + wrong).name, wantName = siteBy(t.site).name;
+          if (cfg.autoResume) {
+            var fixed = await waitHuman(t, job, '当前 Temu 是「' + realName + '」站，不是「' + wantName + '」。请点页面顶部「更改国家/地区」选「' + wantName + '」', function () { return !temuRegionMismatch(t.site); });
+            if (!running) { job.paused = true; setJob(job); render(); return; }
+            if (!fixed) { log('等了 30 分钟国家还没切换，跳过「' + taskLabel(t) + '」', true); job.idx++; setJob(job); continue; }
+            t.navigated = true; setJob(job);
+            log('国家已切换到「' + wantName + '」，重新打开搜索页');
+            location.href = taskUrl(t);
+            return;
+          }
+          notify('Temu 国家不对', '当前是「' + realName + '」站，需要切换到「' + wantName + '」');
           job.paused = true; t.tries = 0; t.navigated = false; setJob(job); running = false;
           log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」。Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
           render();
@@ -885,19 +1101,111 @@ const COLLECTOR_BODY = String.raw`
         }
       }
       log('开始：' + taskLabel(t) + '（' + (job.idx + 1) + '/' + job.tasks.length + '）');
+      lastProgress = Date.now();
       await runTask(t, job);
       if (!running) { job.paused = true; setJob(job); render(); return; }
       job.idx++; setJob(job); render();
     }
-    setJob(null); running = false;
-    log('全部任务完成，可以导出 CSV');
+    finishJob('全部任务完成');
+  }
+  function finishJob(reason) {
+    setJob(null); running = false; queue.length = 0;
+    log(reason + '，可以导出 CSV / 日报');
+    notify('灵图采集结束', reason + '\n' + reportText(today()), { sound: false, force: true });
     render();
+  }
+  // Unattended mode: alert the user, keep the job alive, and continue on its own once the page is fixed.
+  async function waitHuman(t, job, what, check) {
+    waitingHuman = true; t.tries = 0; setJob(job); render();
+    log(what + '。已提醒你，处理好后会自动继续（最多等 30 分钟）', true);
+    notify('采集需要人工处理', siteLabel(currentSite()) + '：' + what);
+    var end = Date.now() + 30 * 60000, ok = false;
+    while (running && Date.now() < end) {
+      await sleep(8000);
+      lastProgress = Date.now();
+      if (check()) { ok = true; break; }
+    }
+    waitingHuman = false; render();
+    if (ok) log('检测到已处理，自动继续');
+    return ok;
+  }
+  function splitKeywords(s) {
+    var out = [];
+    String(s || '').split(/[|｜\n;；]+/).forEach(function (k) { k = k.trim(); if (k && out.indexOf(k) < 0) out.push(k); });
+    return out;
+  }
+  function buildTasks() {
+    var tasks = [];
+    SITES.forEach(function (s) {
+      if (!cfg.sites[s.id].on) return;
+      splitKeywords(cfg.sites[s.id].keyword || s[cfg.gender]).forEach(function (k) { tasks.push({ type: 'search', site: s.id, keyword: k }); });
+    });
+    return tasks;
   }
   function startJob(tasks) {
     setJob({ v: JOB_VERSION, tasks: tasks, idx: 0, paused: false, visitedGoods: [], visitedStores: [] });
     runJob();
   }
   function pause() { running = false; var j = getJob(); if (j) { j.paused = true; setJob(j); } render(); }
+
+  async function genKeywords() {
+    var on = SITES.filter(function (s) { return cfg.sites[s.id].on; });
+    if (!on.length) { showTab('country'); log('请先勾选站点', true); return; }
+    var men = cfg.gender === 'men';
+    log('正在让豆包为 ' + on.length + ' 个站点生成关键词…');
+    var r = await doubao('我做跨境电商，要在这些站点搜索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。请为每个站点生成 4 个当地买家真实会搜的关键词：用该站点当地语言，彼此说法不同，都要表达「黑色 + 印花/图案 + 短袖 T 恤 + ' + (men ? '男' : '女') + '」，不要出现品牌、IP、长袖、卫衣、儿童。站点：' +
+      on.map(function (s) { return s.id + '=' + siteLabel(s) + '（参考：' + s[cfg.gender] + '）'; }).join('；') +
+      '。只返回 JSON：{"sites":{"站点代码":["关键词1","关键词2","关键词3","关键词4"]}}');
+    var map = r.sites || {}, n = 0;
+    on.forEach(function (s) {
+      var list = map[s.id];
+      if (!Array.isArray(list) || !list.length) return;
+      var first = splitKeywords(cfg.sites[s.id].keyword)[0] || s[cfg.gender];
+      cfg.sites[s.id].keyword = splitKeywords([first].concat(list).join('|')).slice(0, 5).join(' | ');
+      n++;
+    });
+    save(); syncSites();
+    log('豆包已为 ' + n + ' 个站点生成关键词，开始采集后每个关键词依次搜索');
+  }
+
+  // Stalled page (blank, frozen, endless spinner): reload; the saved job resumes where it left off.
+  setInterval(function () {
+    if (!running || waitingHuman || resting || Date.now() - lastProgress < 6 * 60000) return;
+    var j = getJob(), t = j && j.tasks[j.idx];
+    if (!t) return;
+    t.reloads = (t.reloads || 0) + 1;
+    if (t.reloads > 2) { log('「' + taskLabel(t) + '」连续卡住，跳到下一个任务', true); j.idx++; }
+    else { log('6 分钟没有进展，刷新页面后自动续采', true); t.navigated = true; }
+    running = false;
+    setJob(j);
+    location.reload();
+  }, 30000);
+
+  // Schedule + daily report. Needs this Chrome open with at least one platform tab.
+  setInterval(function () {
+    var hm = nowHM(), d = today(), rt = normTime(cfg.reportTime);
+    if (rt && hm >= rt && GM_getValue('reportedDay', '') !== d) {
+      GM_setValue('reportedDay', d);
+      notify('灵图采集日报 ' + d, reportText(d), { sound: false, force: true });
+      log('已发送今日日报');
+    }
+    if (getJob()) return;
+    String(cfg.schedule || '').split(/[,，\s]+/).map(normTime).filter(Boolean).forEach(function (slot) {
+      var key = d + ' ' + slot, diff = toMin(hm) - toMin(slot);
+      if (diff < 0 || diff > 15) return;
+      var ran = GM_getValue('schedRan', {});
+      if (ran[key] || getJob()) return;
+      ran[key] = 1;
+      Object.keys(ran).forEach(function (k) { if (k.slice(0, 10) !== d) delete ran[k]; });
+      GM_setValue('schedRan', ran);
+      if (capReached()) { log('定时 ' + slot + '：今日已达上限，不开工'); return; }
+      var tasks = buildTasks();
+      if (!tasks.length || !preflight()) return;
+      log('定时开工 ' + slot + '：共 ' + tasks.length + ' 个搜索任务');
+      notify('定时采集开始', slot + ' 开始，共 ' + tasks.length + ' 个搜索任务', { sound: false, force: true });
+      startJob(tasks);
+    });
+  }, 20000);
 
   async function recommendSites() {
     var list = SITES.map(function (s) { return s.id + '=' + siteLabel(s); }).join('，');
@@ -942,7 +1250,7 @@ const COLLECTOR_BODY = String.raw`
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong style="font-size:14px">爆款图案采集 → 灵图 · ' + PNAMES[PKEY] + '</strong>' +
       '<button data-k="min" aria-label="收起" style="background:none;border:0;color:' + C.dim + ';cursor:pointer;font-size:16px">–</button></div>' +
     '<div data-k="body">' +
-      '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '平台/站点') + tabBtn('filter', '过滤') + tabBtn('api', '豆包/同步') + '</div>' +
+      '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '站点') + tabBtn('filter', '过滤') + tabBtn('auto', '自动') + tabBtn('api', '豆包/去重') + '</div>' +
       '<div style="max-height:52vh;overflow:auto;padding-right:2px">' +
         '<div data-pane="main">' +
           row(field('最低销量/评价数', input('minSales', 'type="number" min="1"')), field('每次搜索采集', input('target', 'type="number" min="1"'))) +
@@ -955,6 +1263,19 @@ const COLLECTOR_BODY = String.raw`
         '<div data-pane="country" style="display:none">' +
           hint('勾选要采集的平台和国家站点，会按顺序逐个搜索，跨平台也会自动跳转。请先在这个浏览器里手动登录这些网站。关键词可改。') + siteRows +
           '<button data-k="recommend" style="' + btnCss + ';width:100%;margin-top:4px">问豆包：黑 T 在哪些平台/国家卖得多</button>' +
+          '<button data-k="genKw" style="' + btnCss + ';width:100%;margin-top:6px">让豆包给已选站点各生成多个关键词（轮换搜索）</button>' +
+          hint('一个站点可以写多个关键词，用「|」隔开，会依次搜索。') +
+        '</div>' +
+        '<div data-pane="auto" style="display:none">' +
+          field('定时开工（多个用逗号隔开，如 09:00,20:00）', input('schedule', 'placeholder="留空 = 不定时"')) +
+          row(field('每日最多同步（0 = 不限）', input('dailyCap', 'type="number" min="0"')), field('日报推送时间', input('reportTime', 'placeholder="22:00"'))) +
+          row(field('每采几张休息一次', input('restEvery', 'type="number" min="0"')), field('每次休息分钟', input('restMin', 'type="number" min="0"'))) +
+          check('autoResume', '遇到验证码 / 要登录 / 国家不对：提醒我，处理好后自动继续') +
+          check('beep', '需要处理时电脑响提示音') +
+          field('微信提醒', '<select data-k="pushType" style="' + inputCss + '"><option value="none">不推送</option><option value="serverchan">Server 酱</option><option value="pushplus">PushPlus</option></select>') +
+          field('推送 SendKey / Token', input('pushKey', 'type="password"')) +
+          '<div style="display:flex;gap:6px;margin-bottom:6px"><button data-k="testPush" style="' + btnCss + '">测试提醒</button><button data-k="report" style="' + btnCss + '">导出日报</button></div>' +
+          hint('定时开工需要这个 Chrome 开着，并至少打开一个平台网页（如 Temu 首页）。页面刷新或崩溃后会自动从中断处续采；6 分钟没进展会自动刷新。') +
         '</div>' +
         '<div data-pane="filter" style="display:none">' +
           check('pixelCheck', '检测图片：非黑色 / 印花太满的不要') +
@@ -975,7 +1296,15 @@ const COLLECTOR_BODY = String.raw`
           field('每次采集间隔（秒）', input('clickGap', 'type="number" min="1" max="30"')) +
           hint('不再使用灵图 API。如果 Alt+1 没反应，改选「自动点按钮」。') +
           check('saveOriginal', '同时把原图和标题保存到电脑') +
-          '<button data-k="clear" style="' + linkCss + ';margin-top:6px">清空已采集记录（允许重复采集）</button>' +
+          '<div style="border-top:1px solid ' + C.line + ';margin:8px 0;padding-top:8px"><strong>去重（防止重复花灵豆）</strong></div>' +
+          hint('同一个商品 ID 永远只同步一次；灵图按钮显示「再次采集」的也会跳过；所有标签页共用一个去重库。') +
+          check('imgDedupe', '图案相似去重：不同卖家的同款图也不重复采') +
+          '<div data-k="dbInfo" style="font-size:12px;color:' + C.dim + ';margin-bottom:6px"></div>' +
+          '<div style="display:flex;gap:6px;margin-bottom:6px"><button data-k="exportDb" style="' + btnCss + '">备份去重库</button><button data-k="importDb" style="' + btnCss + '">导入去重库</button></div>' +
+          '<input data-k="dbFile" type="file" accept=".json,application/json" style="display:none">' +
+          hint('重装油猴或换电脑前先备份，导入后旧商品不会再被同步。') +
+          '<button data-k="clear" style="' + linkCss + ';display:block;margin-top:4px">重新审核跳过的商品（已同步的仍不会重复）</button>' +
+          '<button data-k="clearSynced" style="' + linkCss + ';display:block;margin-top:6px;color:' + C.red + '">清空全部记录（会重复花灵豆）</button>' +
         '</div>' +
       '</div>' +
       '<div style="display:flex;gap:6px;margin:10px 0 6px"><button data-k="start" style="' + btnCss + ';border:0;background:' + C.blue + ';color:#fff">开始多站点采集</button>' +
@@ -983,6 +1312,7 @@ const COLLECTOR_BODY = String.raw`
       '<div style="display:flex;gap:6px;margin-bottom:6px"><button data-k="store" style="' + btnCss + ';display:none">进入本店采集</button>' +
         '<button data-k="pause" style="' + btnCss + '">暂停</button><button data-k="end" style="' + btnCss + '">结束任务</button><button data-k="csv" style="' + btnCss + '">导出 CSV</button></div>' +
       '<div data-k="job" style="font-size:12px;color:' + C.dim + '"></div>' +
+      '<div data-k="today" style="margin-top:4px;font-size:12px;color:' + C.text + '"></div>' +
       '<div data-k="stats" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px;color:' + C.dim + '"></div>' +
       '<div data-k="log" style="margin-top:6px;max-height:110px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;color:' + C.dim + '"></div>' +
     '</div>';
@@ -1032,15 +1362,22 @@ const COLLECTOR_BODY = String.raw`
   });
   syncSites();
 
-  ['arkKey', 'arkModel', 'skipWords', 'removeWords', 'handoff'].forEach(function (k) {
+  ['arkKey', 'arkModel', 'skipWords', 'removeWords', 'handoff', 'schedule', 'reportTime', 'pushType', 'pushKey'].forEach(function (k) {
     $(k).value = cfg[k];
-    $(k).onchange = function () { cfg[k] = $(k).value.trim(); save(); if (/Words$/.test(k)) compileRules(); };
+    $(k).onchange = function () {
+      var v = $(k).value.trim();
+      if (k === 'reportTime') v = normTime(v);
+      if (k === 'schedule') v = v.split(/[,，\s]+/).map(normTime).filter(Boolean).join(',');
+      cfg[k] = v; $(k).value = v; save();
+      if (/Words$/.test(k)) compileRules();
+      if (k === 'schedule') log(v ? '定时开工：' + v : '已关闭定时开工');
+    };
   });
-  ['minSales', 'target', 'maxPages', 'storeCount', 'storeTarget', 'darkMin', 'clickGap'].forEach(function (k) {
+  ['minSales', 'target', 'maxPages', 'storeCount', 'storeTarget', 'darkMin', 'clickGap', 'dailyCap', 'restEvery', 'restMin'].forEach(function (k) {
     $(k).value = cfg[k];
-    $(k).onchange = function () { var v = parseInt($(k).value, 10); cfg[k] = isFinite(v) && v >= 0 ? v : DEFAULTS[k]; $(k).value = cfg[k]; save(); };
+    $(k).onchange = function () { var v = parseInt($(k).value, 10); cfg[k] = isFinite(v) && v >= 0 ? v : DEFAULTS[k]; $(k).value = cfg[k]; save(); render(); };
   });
-  ['blackOnly', 'pixelCheck', 'enterStore', 'saveOriginal', 'aiCheck', 'aiVision'].forEach(function (k) {
+  ['blackOnly', 'pixelCheck', 'enterStore', 'saveOriginal', 'aiCheck', 'aiVision', 'imgDedupe', 'autoResume', 'beep'].forEach(function (k) {
     $(k).checked = !!cfg[k];
     $(k).onchange = function () { cfg[k] = $(k).checked; save(); };
   });
@@ -1057,7 +1394,51 @@ const COLLECTOR_BODY = String.raw`
     save(); compileRules(); log('已恢复默认词库');
   };
   $('min').onclick = function () { var b = $('body'); b.style.display = b.style.display === 'none' ? '' : 'none'; };
-  $('clear').onclick = function () { if (confirm('清空后，之前采集过的商品会被重新采集，确定吗？')) { done.clear(); records = []; GM_setValue('done', []); GM_setValue('records', []); log('已清空采集记录'); } };
+  $('clear').onclick = function () {
+    if (!confirm('之前被审核跳过的商品会重新审核（会再用豆包），已同步到灵图的仍然不会重复。确定吗？')) return;
+    refreshSets();
+    var keep = Array.from(done).filter(function (k) { return synced.has(k); });
+    done = new Set(keep); GM_setValue('done', keep);
+    log('已允许重新审核跳过的商品，已同步 ' + synced.size + ' 张仍受保护'); render();
+  };
+  $('clearSynced').onclick = function () {
+    var ans = prompt('这会让已同步到灵图的 ' + synced.size + ' 张图可以再次被同步，会重复花灵豆。确定请输入「清空」：');
+    if (ans !== '清空') { log('已取消清空'); return; }
+    done.clear(); synced.clear(); records = []; hashes = [];
+    ['done', 'synced', 'records', 'hashes'].forEach(function (k) { GM_setValue(k, []); });
+    log('已清空全部记录', true); render();
+  };
+  $('exportDb').onclick = function () {
+    refreshSets();
+    var data = JSON.stringify({ v: 1, exportedAt: new Date().toISOString(), synced: Array.from(synced), done: Array.from(done), hashes: GM_getValue('hashes', []) });
+    var url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+    GM_download({ url: url, name: '爆款图案/去重库备份_' + today() + '.json', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
+    log('已备份去重库：已同步 ' + synced.size + ' 张');
+  };
+  $('importDb').onclick = function () { $('dbFile').value = ''; $('dbFile').click(); };
+  $('dbFile').onchange = function () {
+    var f = $('dbFile').files[0];
+    if (!f) return;
+    f.text().then(function (txt) {
+      var data = JSON.parse(txt), before = synced.size;
+      refreshSets();
+      (data.synced || []).forEach(function (k) { synced.add(k); done.add(k); });
+      (data.done || []).forEach(function (k) { done.add(k); });
+      var hs = GM_getValue('hashes', []), seenK = {};
+      hs.forEach(function (x) { seenK[x.k] = 1; });
+      (data.hashes || []).forEach(function (x) { if (x && x.h && !seenK[x.k]) { hs.push(x); seenK[x.k] = 1; } });
+      GM_setValue('synced', Array.from(synced)); GM_setValue('done', Array.from(done)); GM_setValue('hashes', hs); hashes = hs;
+      log('已导入去重库：新增已同步 ' + (synced.size - before) + ' 张，共 ' + synced.size + ' 张'); render();
+    }).catch(function (e) { log('导入失败：' + e.message, true); });
+  };
+  $('testPush').onclick = function () {
+    beep();
+    notify('灵图采集测试提醒', '收到这条说明提醒设置正确。\n' + reportText(today()), { sound: false, force: true }).then(function (ok) {
+      log(cfg.pushType === 'none' ? '已播放提示音（没开微信推送）' : ok ? '测试推送已发送，请看微信' : '微信推送失败，检查 Key', !ok && cfg.pushType !== 'none');
+    });
+  };
+  $('report').onclick = exportReport;
+  $('genKw').onclick = function () { genKeywords().catch(function (e) { log(e.message, true); }); };
   $('recommend').onclick = function () { recommendSites().catch(function (e) { log(e.message, true); }); };
 
   function preflight() {
@@ -1067,8 +1448,8 @@ const COLLECTOR_BODY = String.raw`
   $('start').onclick = function () {
     if (getJob()) { log('已有任务，点「暂停/继续」或先「结束任务」'); return; }
     if (!preflight()) return;
-    var tasks = SITES.filter(function (s) { return cfg.sites[s.id].on; })
-      .map(function (s) { return { type: 'search', site: s.id, keyword: cfg.sites[s.id].keyword }; });
+    if (capReached()) { log('今日已达每日上限 ' + cfg.dailyCap + '，到「自动」里调高或改成 0', true); return; }
+    var tasks = buildTasks();
     if (!tasks.length) { showTab('country'); log('请至少勾选一个站点', true); return; }
     startJob(tasks);
   };
@@ -1078,7 +1459,7 @@ const COLLECTOR_BODY = String.raw`
     startJob([{ type: 'here', site: currentSite().id, path: location.pathname }]);
   };
   $('store').onclick = function () {
-    if (getJob()) { log('已有任务，请先「结���任务」'); return; }
+    if (getJob()) { log('已有任务，请先「结�����任务」'); return; }
     if (!preflight()) return;
     var link = findStoreLink();
     if (!link) { log('这个页面没找到店铺入口', true); return; }
@@ -1106,12 +1487,16 @@ const COLLECTOR_BODY = String.raw`
     $('pause').disabled = !j;
     $('store').style.display = isGoodsPage() && !j ? '' : 'none';
     $('job').textContent = j ? '任务 ' + Math.min(j.idx + 1, j.tasks.length) + '/' + j.tasks.length + '：' + (j.tasks[j.idx] ? taskLabel(j.tasks[j.idx]) : '收尾') + (j.paused ? '（已暂停）' : '') : '没有进行中的任务';
-    $('stats').textContent = siteLabel(currentSite()) + ' · 识别 ' + stats.found + ' · 达标 ' + stats.candidates + ' · 跳过 ' + stats.skipped + ' · 保存 ' + stats.saved + ' · 失败 ' + stats.failed + ' · 排队 ' + pending() + ' · 累计 ' + done.size;
+    $('stats').textContent = siteLabel(currentSite()) + ' · 识别 ' + stats.found + ' · 达标 ' + stats.candidates + ' · 跳过 ' + stats.skipped + ' · 保存 ' + stats.saved + ' · 失败 ' + stats.failed + ' · 去重 ' + stats.dup + ' · 排队 ' + pending();
+    var s = dayStats();
+    $('today').textContent = '今日：同步 ' + s.saved + (cfg.dailyCap ? '/' + cfg.dailyCap : '') + ' · 去重拦截 ' + s.dup + ' · 跳过 ' + s.skipped +
+      (waitingHuman ? ' · 等待人工处理' : '') + (resting ? ' · 休息中' : '') + (cfg.schedule && !j ? ' · 定时 ' + cfg.schedule : '');
+    $('dbInfo').textContent = '去重库：已同步 ' + synced.size + ' 张 · 已审核 ' + done.size + ' 个 · 图案指纹 ' + hashes.length + ' 个';
   }
 
   compileRules();
   render();
-  log('就绪 v6.5.0 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.6.0 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1133,7 +1518,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.5.0',
+    '// @version      6.6.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
@@ -1141,6 +1526,7 @@ export function buildUserscript() {
     '// @grant        GM_getValue',
     '// @grant        GM_setValue',
     '// @grant        GM_registerMenuCommand',
+    '// @grant        GM_notification',
     '// @connect      *',
     '// @run-at       document-idle',
     '// @noframes',
