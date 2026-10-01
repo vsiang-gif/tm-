@@ -459,8 +459,13 @@ const COLLECTOR_BODY = String.raw`
   }
   function fire(el, types, x, y) {
     types.forEach(function (type) {
-      var opts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y };
-      var ev = /^pointer/.test(type) && window.PointerEvent ? new PointerEvent(type, opts) : new MouseEvent(type, opts);
+      var opts = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y };
+      var ev;
+      try {
+        ev = /^pointer/.test(type) && typeof PointerEvent === 'function' ? new PointerEvent(type, opts) : new MouseEvent(type, opts);
+      } catch (e) {
+        ev = new MouseEvent(type.replace(/^pointer/, 'mouse'), opts);
+      }
       el.dispatchEvent(ev);
     });
   }
@@ -471,8 +476,8 @@ const COLLECTOR_BODY = String.raw`
   }
   function pressAlt1(target) {
     ['keydown', 'keyup'].forEach(function (type) {
-      [target, document, window].forEach(function (t) {
-        t.dispatchEvent(new KeyboardEvent(type, { key: '1', code: 'Digit1', keyCode: 49, which: 49, altKey: true, bubbles: true, cancelable: true, composed: true }));
+      [target, document.body, document].forEach(function (t) {
+        if (t) t.dispatchEvent(new KeyboardEvent(type, { key: '1', code: 'Digit1', keyCode: 49, which: 49, altKey: true, bubbles: true, cancelable: true, composed: true }));
       });
     });
   }
@@ -1072,7 +1077,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.2.0',
+    '// @version      6.2.1',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
