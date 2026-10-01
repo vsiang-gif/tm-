@@ -709,22 +709,46 @@ const COLLECTOR_BODY = String.raw`
     return fresh;
   }
   function visible(el) { return el.offsetParent !== null && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; }
-  function clickMore() {
-    var els = document.querySelectorAll('button, [role="button"], div, span, a');
-    var hit = null;
+  function findMore() {
+    var els = document.querySelectorAll('button, [role="button"], a, div, span');
+    var best = null, bestBottom = -Infinity;
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       if (el === host || host.contains(el)) continue;
-      var t = (el.innerText || '').trim();
-      if (t.length < 24 && MORE_RE.test(t) && el.offsetParent !== null) hit = el;
+      var t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!t || t.length > 24 || !MORE_RE.test(t)) continue;
+      var r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      var bottom = r.bottom + window.scrollY;
+      // Same button: keep the innermost match; otherwise prefer the one lowest on the page (the list's own "see more").
+      if (best && best.contains(el)) { best = el; bestBottom = bottom; continue; }
+      if (bottom > bestBottom) { best = el; bestBottom = bottom; }
     }
+    return best;
+  }
+  function productCount() { return document.querySelectorAll('a[href]').length + document.querySelectorAll('img').length; }
+  async function clickMore() {
+    var hit = findMore();
     if (!hit) return false;
     var btn = hit.closest('button, [role="button"], a') || hit;
-    try { btn.scrollIntoView({ block: 'center' }); } catch (e) {}
-    var r = btn.getBoundingClientRect();
-    fire(btn, ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], r.left + r.width / 2, r.top + r.height / 2);
-    log('点击「查看更多」加载下一批');
-    return true;
+    var before = productCount();
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try { btn.scrollIntoView({ block: 'center' }); } catch (e) {}
+      await sleep(600 + Math.random() * 400);
+      var r = btn.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      var target = document.elementFromPoint(x, y) || hit;
+      if (host.contains(target)) target = hit;
+      fire(target, ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], x, y);
+      if (target !== btn && typeof btn.click === 'function') { try { btn.click(); } catch (e) {} }
+      log('点击「查看更多」加载下一批' + (attempt ? '（第 ' + (attempt + 1) + ' 次尝试）' : ''));
+      var grew = await waitFor(function () { return productCount() > before; }, 6000);
+      if (grew) { await sleep(1200); return true; }
+      hit = findMore();
+      if (!hit) return productCount() > before;
+      btn = hit.closest('button, [role="button"], a') || hit;
+    }
+    log('「查看更多」点了 3 次没加载出新商品，可能已到底');
+    return false;
   }
   function clickNext() {
     var els = document.querySelectorAll(NEXT_SEL);
@@ -738,6 +762,7 @@ const COLLECTOR_BODY = String.raw`
       if (ctx.backlog.length) { await sleep(800); continue; }
       if (idle >= 6) {
         if (pending()) { await sleep(800); continue; }
+        if (await clickMore()) { idle = 0; continue; }
         // Paginated sites: go to the next page. Full reloads resume from t.page / t.carry; SPA pages just keep scanning.
         if ((t.page || 0) < cfg.maxPages - 1 && clickNext()) {
           t.page = (t.page || 0) + 1; t.carry = ctx.saved; setJob(ctx.job);
@@ -750,10 +775,10 @@ const COLLECTOR_BODY = String.raw`
       }
       if (scan(ctx) > 0) { idle = 0; continue; }
       if (pending()) { await sleep(800); continue; }
+      if (findMore() && await clickMore()) { idle = 0; continue; }
       idle++;
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
       await sleep(1800 + Math.random() * 1500);
-      if (clickMore()) await sleep(1500 + Math.random() * 1200);
     }
     if (!running) queue.length = 0;
     while (pending()) await sleep(800);
@@ -1053,7 +1078,7 @@ const COLLECTOR_BODY = String.raw`
     startJob([{ type: 'here', site: currentSite().id, path: location.pathname }]);
   };
   $('store').onclick = function () {
-    if (getJob()) { log('已有任务，请先「结束任务」'); return; }
+    if (getJob()) { log('已有任务，请先「结���任务」'); return; }
     if (!preflight()) return;
     var link = findStoreLink();
     if (!link) { log('这个页面没找到店铺入口', true); return; }
@@ -1086,7 +1111,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.4.0 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.5.0 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1108,7 +1133,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.4.0',
+    '// @version      6.5.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
