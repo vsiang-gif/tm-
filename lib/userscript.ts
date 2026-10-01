@@ -213,15 +213,16 @@ const COLLECTOR_BODY = String.raw`
   var DEFAULTS = {
     arkKey: '', arkModel: 'doubao-seed-2-0-pro',
     minSales: 20, target: 60, maxPages: 5, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
-    enterStore: true, storeCount: 3, storeTarget: 30,
+    enterStore: false, storeCount: 3, storeTarget: 30,
     handoff: 'alt1', clickGap: 3, saveOriginal: false, aiCheck: true, aiVision: true,
     skipWords: DEFAULT_SKIP.join('，'), removeWords: DEFAULT_REMOVE.join('，'),
     sites: {}, v: 6
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
   if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
-  if (cfg.v !== 6 && cfg.v !== 7) { cfg.v = 6; cfg.aiCheck = true; cfg.saveOriginal = false; cfg.handoff = 'alt1'; }
-  if (cfg.v === 6) { cfg.v = 7; if (cfg.minSales === 100) cfg.minSales = DEFAULTS.minSales; GM_setValue('cfg', cfg); }
+  if (cfg.v !== 6 && cfg.v !== 7 && cfg.v !== 8) { cfg.v = 6; cfg.aiCheck = true; cfg.saveOriginal = false; cfg.handoff = 'alt1'; }
+  if (cfg.v === 6) { cfg.v = 7; if (cfg.minSales === 100) cfg.minSales = DEFAULTS.minSales; }
+  if (cfg.v === 7) { cfg.v = 8; cfg.enterStore = false; GM_setValue('cfg', cfg); }
   if (['alt1', 'click', 'mark'].indexOf(cfg.handoff) < 0) cfg.handoff = 'alt1';
   ['apiBase', 'appId', 'secret', 'crop', 'matting', 'dress', 'stanceId', 'backgroundId', 'dressAr', 'dressNum', 'lingtuTitle'].forEach(function (k) { delete cfg[k]; });
   var oldCountries = cfg.countries || {};
@@ -327,7 +328,14 @@ const COLLECTOR_BODY = String.raw`
     return isFinite(n) ? Math.round(n * (MULT[String(m[2] || '').toLowerCase()] || 1)) : null;
   }
   // Sales first; platforms that hide sales (Etsy / Amazon / SHEIN) fall back to the review count.
+  // Prices like "$13.48 已售 371件" must not be read as the sales count.
+  function stripPrices(text) {
+    return String(text || '')
+      .replace(/(?:US\$|C\$|A\$|S\$|MX\$|R\$|NZ\$|HK\$|Rp|RM|₱|฿|₫|[$£€¥￥₩₹])\s*\d[\d.,]*/gi, ' ')
+      .replace(/\d[\d.,]*\s*(?:€|zł|lei|kr|円|元|₫|đ)/gi, ' ');
+  }
   function parseMetric(text) {
+    text = stripPrices(text);
     var groups = [[SALES_RES, '']];
     if (PLAT.metric !== 'sales') groups.push([REVIEW_RES, '评价 ']);
     for (var g = 0; g < groups.length; g++) {
@@ -457,17 +465,31 @@ const COLLECTOR_BODY = String.raw`
     });
     return hit;
   }
+  // Tampermonkey's sandbox can hand the page a proxied window, which makes UIEvent constructors throw.
+  // Try the page's own constructors, then the sandbox ones, then a plain Event, so dispatching never fails.
+  function makeEvent(kind, type, opts, el) {
+    var wins = [];
+    try { if (typeof unsafeWindow !== 'undefined') wins.push(unsafeWindow); } catch (e) {}
+    try { if (el && el.ownerDocument && el.ownerDocument.defaultView) wins.push(el.ownerDocument.defaultView); } catch (e) {}
+    wins.push(null);
+    for (var i = 0; i < wins.length; i++) {
+      try {
+        var C = wins[i] ? wins[i][kind] : (typeof self !== 'undefined' ? self[kind] : null);
+        if (typeof C === 'function') return new C(type, opts);
+      } catch (e) {}
+    }
+    try { return new Event(type, { bubbles: true, cancelable: true, composed: true }); } catch (e) { return null; }
+  }
+  function dispatch(el, ev) { try { if (el && ev) el.dispatchEvent(ev); } catch (e) {} }
   function fire(el, types, x, y) {
     types.forEach(function (type) {
       var opts = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y };
-      var ev;
-      try {
-        ev = /^pointer/.test(type) && typeof PointerEvent === 'function' ? new PointerEvent(type, opts) : new MouseEvent(type, opts);
-      } catch (e) {
-        ev = new MouseEvent(type.replace(/^pointer/, 'mouse'), opts);
-      }
-      el.dispatchEvent(ev);
+      var kind = /^pointer/.test(type) ? 'PointerEvent' : 'MouseEvent';
+      var ev = makeEvent(kind, type, opts, el);
+      if (!ev && kind === 'PointerEvent') ev = makeEvent('MouseEvent', type.replace(/^pointer/, 'mouse'), opts, el);
+      dispatch(el, ev);
     });
+    if (types.indexOf('click') >= 0 && typeof el.click === 'function') { try { el.click(); } catch (e) {} }
   }
   function hover(el) {
     var r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 3;
@@ -477,7 +499,7 @@ const COLLECTOR_BODY = String.raw`
   function pressAlt1(target) {
     ['keydown', 'keyup'].forEach(function (type) {
       [target, document.body, document].forEach(function (t) {
-        if (t) t.dispatchEvent(new KeyboardEvent(type, { key: '1', code: 'Digit1', keyCode: 49, which: 49, altKey: true, bubbles: true, cancelable: true, composed: true }));
+        if (t) dispatch(t, makeEvent('KeyboardEvent', type, { key: '1', code: 'Digit1', keyCode: 49, which: 49, altKey: true, bubbles: true, cancelable: true, composed: true }, target));
       });
     });
   }
@@ -689,11 +711,20 @@ const COLLECTOR_BODY = String.raw`
   function visible(el) { return el.offsetParent !== null && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; }
   function clickMore() {
     var els = document.querySelectorAll('button, [role="button"], div, span, a');
+    var hit = null;
     for (var i = 0; i < els.length; i++) {
-      var t = (els[i].innerText || '').trim();
-      if (t.length < 24 && MORE_RE.test(t) && els[i].offsetParent !== null) { els[i].click(); return true; }
+      var el = els[i];
+      if (el === host || host.contains(el)) continue;
+      var t = (el.innerText || '').trim();
+      if (t.length < 24 && MORE_RE.test(t) && el.offsetParent !== null) hit = el;
     }
-    return false;
+    if (!hit) return false;
+    var btn = hit.closest('button, [role="button"], a') || hit;
+    try { btn.scrollIntoView({ block: 'center' }); } catch (e) {}
+    var r = btn.getBoundingClientRect();
+    fire(btn, ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], r.left + r.width / 2, r.top + r.height / 2);
+    log('点击「查看更多」加载下一批');
+    return true;
   }
   function clickNext() {
     var els = document.querySelectorAll(NEXT_SEL);
@@ -846,7 +877,7 @@ const COLLECTOR_BODY = String.raw`
   async function recommendSites() {
     var list = SITES.map(function (s) { return s.id + '=' + siteLabel(s); }).join('，');
     log('正在问豆包哪些平台和国家黑色印花 T 恤卖得好…');
-    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的平台和国家站点采集爆款图案。请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
+    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的平台和国家站点采集爆款图案��请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
     var ids = (r.sites || r.countries || []).map(function (x) { return String(x).toLowerCase(); });
     SITES.forEach(function (s) { cfg.sites[s.id].on = ids.indexOf(s.id) >= 0; });
     if (!ids.some(function (id) { return cfg.sites[id]; })) cfg.sites['temu-us'].on = true;
@@ -1077,7 +1108,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.2.1',
+    '// @version      6.3.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
