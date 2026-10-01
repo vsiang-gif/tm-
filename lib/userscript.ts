@@ -214,13 +214,14 @@ const COLLECTOR_BODY = String.raw`
     arkKey: '', arkModel: 'doubao-seed-2-0-pro',
     minSales: 100, target: 60, maxPages: 5, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
     enterStore: true, storeCount: 3, storeTarget: 30,
-    handoff: 'click', clickGap: 3, saveOriginal: false, aiCheck: true, aiVision: true,
+    handoff: 'alt1', clickGap: 3, saveOriginal: false, aiCheck: true, aiVision: true,
     skipWords: DEFAULT_SKIP.join('，'), removeWords: DEFAULT_REMOVE.join('，'),
-    sites: {}, v: 5
+    sites: {}, v: 6
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
   if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
-  if (cfg.v !== 5) { cfg.v = 5; cfg.aiCheck = true; cfg.saveOriginal = false; }
+  if (cfg.v !== 6) { cfg.v = 6; cfg.aiCheck = true; cfg.saveOriginal = false; cfg.handoff = 'alt1'; }
+  if (['alt1', 'click', 'mark'].indexOf(cfg.handoff) < 0) cfg.handoff = 'alt1';
   ['apiBase', 'appId', 'secret', 'crop', 'matting', 'dress', 'stanceId', 'backgroundId', 'dressAr', 'dressNum', 'lingtuTitle'].forEach(function (k) { delete cfg[k]; });
   var oldCountries = cfg.countries || {};
   cfg.sites = Object.assign({}, cfg.sites);
@@ -483,9 +484,16 @@ const COLLECTOR_BODY = String.raw`
     var run = handoffLock.then(async function () {
       var card = liveCard(item);
       if (!card) return { ok: false, note: '卡片已不在页面上' };
-      if (cfg.handoff !== 'click') { markCard(card, 'ok', '审核通过，请点灵图「采集并同步」'); return { ok: true, note: '已标记，待手动采集' }; }
+      if (cfg.handoff === 'mark') { markCard(card, 'ok', '审核通过，鼠标移上去按 Alt+1'); return { ok: true, note: '已标记，待手动 Alt+1' }; }
       card.scrollIntoView({ block: 'center', behavior: 'instant' });
       await sleep(400);
+      if (cfg.handoff === 'alt1') {
+        for (var h = 0; h < 3; h++) { hover(card); await sleep(250); }
+        pressAlt1(card);
+        markCard(card, 'ok', '已按 Alt+1 采集并同步');
+        await sleep(cfg.clickGap * 1000 + Math.random() * 800);
+        return { ok: true, note: '已发送 Alt+1 采集并同步' };
+      }
       var btn = null;
       for (var t = 0; t < 8 && !btn; t++) { hover(card); await sleep(300); btn = findLtButton(card); }
       if (btn) {
@@ -506,7 +514,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   async function doubao(content) {
-    if (!cfg.arkKey) throw new Error('请先在「豆包/灵图」里填写豆包 API Key');
+    if (!cfg.arkKey) throw new Error('请先在「豆包/同步」里填写豆包 API Key');
     var r = await gmRequest({
       method: 'POST', url: ARK_URL,
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + cfg.arkKey },
@@ -553,7 +561,7 @@ const COLLECTOR_BODY = String.raw`
   }
   async function aiCheck(item) {
     var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件 T 恤的印花图案。商品标题：' + item.title +
-      '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断，只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满,"notBlack":衣服主体是否不是黑色,"reason":"一句话中文原因"}，布尔值用 true/false。';
+      '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断，���返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满,"notBlack":衣服主体是否不是黑色,"reason":"一句话中文原因"}，布尔值用 true/false。';
     var content = cfg.aiVision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: item.imageUrl } }]
       : prompt;
@@ -597,7 +605,7 @@ const COLLECTOR_BODY = String.raw`
     var res = await handoff(item);
     if (!res.ok) { stats.failed++; log('交给灵图失败 ' + item.goodsId + '：' + res.note, true); return false; }
     markDone(item);
-    records.push({ status: cfg.handoff === 'click' ? '已交给灵图' : '已标记', reason: res.note, country: siteLabel(ctx.country), source: ctx.source, goodsId: item.goodsId, title: item.title, cleanTitle: clean, sales: item.salesText, salesCount: item.salesCount, productUrl: item.productUrl, imageUrl: item.imageUrl, files: files.join(' | '), time: new Date().toISOString() });
+    records.push({ status: cfg.handoff === 'mark' ? '已标记' : '已采集并同步', reason: res.note, country: siteLabel(ctx.country), source: ctx.source, goodsId: item.goodsId, title: item.title, cleanTitle: clean, sales: item.salesText, salesCount: item.salesCount, productUrl: item.productUrl, imageUrl: item.imageUrl, files: files.join(' | '), time: new Date().toISOString() });
     GM_setValue('records', records);
     return true;
   }
@@ -833,7 +841,7 @@ const COLLECTOR_BODY = String.raw`
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong style="font-size:14px">爆款图案采集 → 灵图 · ' + PNAMES[PKEY] + '</strong>' +
       '<button data-k="min" aria-label="收起" style="background:none;border:0;color:' + C.dim + ';cursor:pointer;font-size:16px">–</button></div>' +
     '<div data-k="body">' +
-      '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '平台/站点') + tabBtn('filter', '过滤') + tabBtn('api', '豆包/灵图') + '</div>' +
+      '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '平台/站点') + tabBtn('filter', '过滤') + tabBtn('api', '豆包/同步') + '</div>' +
       '<div style="max-height:52vh;overflow:auto;padding-right:2px">' +
         '<div data-pane="main">' +
           row(field('最低销量/评价数', input('minSales', 'type="number" min="1"')), field('每次搜索采集', input('target', 'type="number" min="1"'))) +
@@ -861,10 +869,10 @@ const COLLECTOR_BODY = String.raw`
           field('模型 / 接入点 ID', input('arkModel')) +
           check('aiCheck', '用豆包审核每个商品（违规 / IP 侵权）') +
           check('aiVision', '审核时看图（双面 / 满印 / 颜色）') +
-          '<div style="border-top:1px solid ' + C.line + ';margin:8px 0;padding-top:8px"><strong>交给灵图插件</strong></div>' +
-          field('审核通过后', '<select data-k="handoff" style="' + inputCss + '"><option value="click">自动点灵图「采集并同步」</option><option value="mark">只标绿框，我自己点</option></select>') +
-          field('每次点击间隔（秒）', input('clickGap', 'type="number" min="1" max="30"')) +
-          hint('需要已安装「灵图卖家辅助工具」并登录灵图账号；裁剪、抠图、套图在灵图里做。插件里「采集目标」选「单商品主图」、「采集方式」选「手动采集」。') +
+          '<div style="border-top:1px solid ' + C.line + ';margin:8px 0;padding-top:8px"><strong>采集同步（灵图插件 Alt+1）</strong></div>' +
+          field('审核通过后', '<select data-k="handoff" style="' + inputCss + '"><option value="alt1">自动按 Alt+1 采集并同步（推荐）</option><option value="click">自动点「采集并同步」按钮</option><option value="mark">只标绿框，我自己按 Alt+1</option></select>') +
+          field('每次采集间隔（秒）', input('clickGap', 'type="number" min="1" max="30"')) +
+          hint('不再使用灵图 API。如果 Alt+1 没反应，改选「自动点按钮」。') +
           check('saveOriginal', '同时把原图和标题保存到电脑') +
           '<button data-k="clear" style="' + linkCss + ';margin-top:6px">清空已采集记录（允许重复采集）</button>' +
         '</div>' +
@@ -1024,7 +1032,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      5.0.0',
+    '// @version      6.0.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
