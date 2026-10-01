@@ -1,18 +1,94 @@
-// Runs entirely inside the user's own logged-in browser on temu.com (Tampermonkey).
+// Runs entirely inside the user's own logged-in browser (Tampermonkey) on Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / AliExpress.
 // Kept as a plain-JS string so it ships verbatim, independent of the Next.js bundler.
 // The body is a String.raw template: it must never contain backticks or a dollar-brace sequence.
-export const COUNTRIES = [
-  { code: 'us', name: '美国', prefix: '', lang: '英文', men: 'black graphic t shirt men', women: 'black graphic t shirt women' },
-  { code: 'uk', name: '英国', prefix: 'uk', lang: '英文', men: 'black graphic t shirt men', women: 'black graphic t shirt women' },
-  { code: 'ca', name: '加拿大', prefix: 'ca', lang: '英文', men: 'black graphic t shirt men', women: 'black graphic t shirt women' },
-  { code: 'au', name: '澳大利亚', prefix: 'au', lang: '英文', men: 'black graphic t shirt men', women: 'black graphic t shirt women' },
-  { code: 'de', name: '德国', prefix: 'de', lang: '德文', men: 'schwarzes t-shirt herren print', women: 'schwarzes t-shirt damen print' },
-  { code: 'fr', name: '法国', prefix: 'fr', lang: '法文', men: 't-shirt noir homme imprimé', women: 't-shirt noir femme imprimé' },
-  { code: 'it', name: '意大利', prefix: 'it', lang: '意大利文', men: 'maglietta nera uomo stampa', women: 'maglietta nera donna stampa' },
-  { code: 'es', name: '西班牙', prefix: 'es', lang: '西班牙文', men: 'camiseta negra hombre estampada', women: 'camiseta negra mujer estampada' },
-  { code: 'mx', name: '墨西哥', prefix: 'mx', lang: '西班牙文', men: 'playera negra hombre estampada', women: 'playera negra mujer estampada' },
-  { code: 'jp', name: '日本', prefix: 'jp', lang: '日文', men: 'tシャツ 黒 メンズ プリント', women: 'tシャツ 黒 レディース プリント' },
-] as const
+export const PLATFORM_NAMES = {
+  temu: 'Temu',
+  shein: 'SHEIN',
+  etsy: 'Etsy',
+  amazon: 'Amazon',
+  shopee: 'Shopee',
+  lazada: 'Lazada',
+  aliexpress: '速卖通',
+} as const
+
+type Platform = keyof typeof PLATFORM_NAMES
+type Keywords = readonly [men: string, women: string]
+type Site = { id: string; p: Platform; name: string; origin: string; prefix: string; lang: string; men: string; women: string }
+
+const EN: Keywords = ['black graphic t shirt men', 'black graphic t shirt women']
+const DE: Keywords = ['schwarzes t-shirt herren print', 'schwarzes t-shirt damen print']
+const FR: Keywords = ['t-shirt noir homme imprimé', 't-shirt noir femme imprimé']
+const IT: Keywords = ['maglietta nera uomo stampa', 'maglietta nera donna stampa']
+const ES: Keywords = ['camiseta negra hombre estampada', 'camiseta negra mujer estampada']
+const MX: Keywords = ['playera negra hombre estampada', 'playera negra mujer estampada']
+const JP: Keywords = ['tシャツ 黒 メンズ プリント', 'tシャツ 黒 レディース プリント']
+const TH: Keywords = ['เสื้อยืดสีดำ ผู้ชาย สกรีนลาย', 'เสื้อยืดสีดำ ผู้หญิง สกรีนลาย']
+const VN: Keywords = ['áo thun đen nam in hình', 'áo thun đen nữ in hình']
+const ID: Keywords = ['kaos hitam pria sablon', 'kaos hitam wanita sablon']
+const TW: Keywords = ['黑色印花T恤 男', '黑色印花T恤 女']
+const BR: Keywords = ['camiseta preta masculina estampada', 'camiseta preta feminina estampada']
+
+function site(p: Platform, code: string, name: string, origin: string, lang: string, kw: Keywords, prefix = ''): Site {
+  return { id: p + '-' + code, p, name, origin, prefix, lang, men: kw[0], women: kw[1] }
+}
+
+export const SITES: Site[] = [
+  site('temu', 'us', '美国', 'https://www.temu.com', '英文', EN),
+  site('temu', 'uk', '英国', 'https://www.temu.com', '英文', EN, 'uk'),
+  site('temu', 'ca', '加拿大', 'https://www.temu.com', '英文', EN, 'ca'),
+  site('temu', 'au', '澳大利亚', 'https://www.temu.com', '英文', EN, 'au'),
+  site('temu', 'de', '德国', 'https://www.temu.com', '德文', DE, 'de'),
+  site('temu', 'fr', '法国', 'https://www.temu.com', '法文', FR, 'fr'),
+  site('temu', 'it', '意大利', 'https://www.temu.com', '意大利文', IT, 'it'),
+  site('temu', 'es', '西班牙', 'https://www.temu.com', '西班牙文', ES, 'es'),
+  site('temu', 'mx', '墨西哥', 'https://www.temu.com', '西班牙文', MX, 'mx'),
+  site('temu', 'jp', '日本', 'https://www.temu.com', '日文', JP, 'jp'),
+
+  site('shein', 'us', '美国', 'https://us.shein.com', '英文', EN),
+  site('shein', 'uk', '英国', 'https://www.shein.co.uk', '英文', EN),
+  site('shein', 'ca', '加拿大', 'https://ca.shein.com', '英文', EN),
+  site('shein', 'au', '澳大利亚', 'https://au.shein.com', '英文', EN),
+  site('shein', 'de', '德国', 'https://de.shein.com', '德文', DE),
+  site('shein', 'fr', '法国', 'https://fr.shein.com', '法文', FR),
+  site('shein', 'it', '意大利', 'https://it.shein.com', '意大利文', IT),
+  site('shein', 'es', '西班牙', 'https://es.shein.com', '西班牙文', ES),
+  site('shein', 'mx', '墨西哥', 'https://www.shein.com.mx', '西班牙文', MX),
+
+  site('etsy', 'us', '全球', 'https://www.etsy.com', '英文', EN),
+  site('etsy', 'uk', '英国', 'https://www.etsy.com', '英文', EN, 'uk'),
+  site('etsy', 'de', '德国', 'https://www.etsy.com', '德文', DE, 'de'),
+  site('etsy', 'fr', '法国', 'https://www.etsy.com', '法文', FR, 'fr'),
+
+  site('amazon', 'us', '美国', 'https://www.amazon.com', '英文', EN),
+  site('amazon', 'uk', '英国', 'https://www.amazon.co.uk', '英文', EN),
+  site('amazon', 'ca', '加拿大', 'https://www.amazon.ca', '英文', EN),
+  site('amazon', 'au', '澳大利亚', 'https://www.amazon.com.au', '英文', EN),
+  site('amazon', 'de', '德国', 'https://www.amazon.de', '德文', DE),
+  site('amazon', 'fr', '法国', 'https://www.amazon.fr', '法文', FR),
+  site('amazon', 'it', '意大利', 'https://www.amazon.it', '意大利文', IT),
+  site('amazon', 'es', '西班牙', 'https://www.amazon.es', '西班牙文', ES),
+  site('amazon', 'mx', '墨西哥', 'https://www.amazon.com.mx', '西班牙文', MX),
+  site('amazon', 'jp', '日本', 'https://www.amazon.co.jp', '日文', JP),
+
+  site('shopee', 'sg', '新加坡', 'https://shopee.sg', '英文', EN),
+  site('shopee', 'my', '马来西亚', 'https://shopee.com.my', '英文', EN),
+  site('shopee', 'ph', '菲律宾', 'https://shopee.ph', '英文', EN),
+  site('shopee', 'th', '泰国', 'https://shopee.co.th', '泰文', TH),
+  site('shopee', 'vn', '越南', 'https://shopee.vn', '越南文', VN),
+  site('shopee', 'id', '印尼', 'https://shopee.co.id', '印尼文', ID),
+  site('shopee', 'tw', '台湾', 'https://shopee.tw', '繁体中文', TW),
+  site('shopee', 'br', '巴西', 'https://shopee.com.br', '葡萄牙文', BR),
+
+  site('lazada', 'sg', '新加坡', 'https://www.lazada.sg', '英文', EN),
+  site('lazada', 'my', '马来西亚', 'https://www.lazada.com.my', '英文', EN),
+  site('lazada', 'ph', '菲律宾', 'https://www.lazada.com.ph', '英文', EN),
+  site('lazada', 'th', '泰国', 'https://www.lazada.co.th', '泰文', TH),
+  site('lazada', 'vn', '越南', 'https://www.lazada.vn', '越南文', VN),
+  site('lazada', 'id', '印尼', 'https://www.lazada.co.id', '印尼文', ID),
+
+  site('aliexpress', 'global', '全球', 'https://www.aliexpress.com', '英文', EN),
+  site('aliexpress', 'us', '美国', 'https://www.aliexpress.us', '英文', EN),
+]
 
 // Any hit means the product is not collected at all.
 export const DEFAULT_SKIP_WORDS = [
@@ -44,36 +120,113 @@ const COLLECTOR_BODY = String.raw`
   if (window.top !== window.self || window.__temuPatternCollector) return;
   window.__temuPatternCollector = true;
 
-  var COUNTRIES = __COUNTRIES__;
+  var SITES = __SITES__;
+  var PNAMES = __PNAMES__;
   var DEFAULT_SKIP = __SKIP__;
   var DEFAULT_REMOVE = __REMOVE__;
   var ARK_URL = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
 
-  var MULT = { '万': 10000, 'w': 10000, 'W': 10000, '千': 1000, 'k': 1000, 'K': 1000, 'm': 1000000, 'M': 1000000 };
-  var SOLD_WORDS = '(?:sold|verkauft|vendus?|vendidos?|venduti|verkocht|sprzedano|販売済み?|点販売|已售|售出|件已售)';
+  // ---------- per-platform adapters ----------
+  function stripSuffix(u) { return u.split('?')[0].replace(/(\.(?:jpe?g|png|webp))_.*$/i, '$1'); }
+  var PLATFORMS = {
+    temu: {
+      host: /(^|\.)temu\.com$/i, img: /(^|\.)(kwcdn\.com|temu\.com)$/i, metric: 'sales',
+      search: function (s, k) { return s.origin + '/' + (s.prefix ? s.prefix + '/' : '') + 'search_result.html?search_key=' + encodeURIComponent(k); },
+      isSearch: function () { return /search_result/.test(location.pathname); },
+      goods: function (h) { var m = h.match(/-g-(\d{6,})\.html/) || h.match(/[?&]goods_id=(\d{6,})/); return m ? m[1] : null; },
+      store: function (h) { var m = h.match(/-m-(\d{6,})\.html/) || h.match(/[?&]mall_id=(\d{6,})/); return m ? m[1] : null; },
+      hi: function (u) { return u.split('?')[0]; }
+    },
+    shein: {
+      host: /(^|\.)shein\.[a-z.]+$/i, img: /(ltwebstatic\.com|sheinimg\.com|shein\.[a-z.]+)$/i, metric: 'optional',
+      search: function (s, k) { return s.origin + '/pdsearch/' + encodeURIComponent(k) + '/'; },
+      isSearch: function () { return /\/pdsearch\//.test(location.pathname); },
+      goods: function (h) { var m = h.match(/-p-(\d{5,})(?:-cat-\d+)?\.html/); return m ? m[1] : null; },
+      store: function (h) { var m = h.match(/[?&]store_code=(\d+)/); return m ? m[1] : null; },
+      hi: function (u) { return u.split('?')[0].replace(/_thumbnail_\d+x\d*/i, ''); }
+    },
+    etsy: {
+      host: /(^|\.)etsy\.com$/i, img: /etsystatic\.com$/i, metric: 'reviews',
+      search: function (s, k) { return s.origin + (s.prefix ? '/' + s.prefix : '') + '/search?q=' + encodeURIComponent(k); },
+      isSearch: function () { return /\/search(\/|$)/.test(location.pathname); },
+      goods: function (h) { var m = h.match(/\/listing\/(\d{6,})/); return m ? m[1] : null; },
+      store: function (h) { var m = h.match(/\/shop\/([A-Za-z0-9]{3,})(?=[/?#]|$)/); return m ? m[1] : null; },
+      hi: function (u) { return u.split('?')[0].replace(/il_\d+x[\dN]+\./, 'il_fullxfull.'); }
+    },
+    amazon: {
+      host: /(^|\.)amazon\.[a-z.]+$/i, img: /(media-amazon\.com|ssl-images-amazon\.com)$/i, metric: 'reviews',
+      search: function (s, k) { return s.origin + '/s?k=' + encodeURIComponent(k); },
+      isSearch: function () { return location.pathname === '/s' && /[?&]k=/.test(location.search); },
+      goods: function (h) { var m = h.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?=[/?#]|$)/); return m ? m[1] : null; },
+      store: function (h) { var m = h.match(/[?&](?:me|seller)=([A-Z0-9]{10,16})(?=[&#]|$)/); return m ? m[1] : null; },
+      storeUrl: function (id) { return location.origin + '/s?me=' + id; },
+      hi: function (u) { return u.split('?')[0].replace(/\._[^/]+_\.(jpe?g|png|webp)$/i, '.$1'); }
+    },
+    shopee: {
+      host: /(^|\.)shopee\.[a-z.]+$/i, img: /(susercontent\.com|shopeemobile\.com|shopee\.[a-z.]+)$/i, metric: 'sales',
+      search: function (s, k) { return s.origin + '/search?keyword=' + encodeURIComponent(k); },
+      isSearch: function () { return location.pathname === '/search'; },
+      goods: function (h) { var m = h.match(/-i\.(\d+)\.(\d+)/) || h.match(/\/product\/(\d+)\/(\d+)/); return m ? m[1] + '.' + m[2] : null; },
+      store: function (h) { var m = h.match(/\/shop\/(\d+)/); return m ? m[1] : null; },
+      storeFromGoods: function (g) { var id = g.split('.')[0]; return { storeId: id, url: location.origin + '/shop/' + id }; },
+      hi: function (u) { return u.split('?')[0].replace(/_tn$/, ''); }
+    },
+    lazada: {
+      host: /(^|\.)lazada\.[a-z.]+$/i, img: /(slatic\.net|lazcdn\.com|alicdn\.com)$/i, metric: 'sales',
+      search: function (s, k) { return s.origin + '/catalog/?q=' + encodeURIComponent(k); },
+      isSearch: function () { return /^\/catalog/.test(location.pathname) || /[?&]q=/.test(location.search); },
+      goods: function (h) { var m = h.match(/-i(\d{5,})(?:-s\d+)?\.html/); return m ? m[1] : null; },
+      store: function (h) { var m = h.match(/\/shop\/([a-z0-9-]{3,})/i); return m ? m[1] : null; },
+      hi: stripSuffix
+    },
+    aliexpress: {
+      host: /(^|\.)aliexpress\.[a-z.]+$/i, img: /(alicdn\.com|aliexpress-media\.com)$/i, metric: 'sales',
+      search: function (s, k) { return s.origin + '/w/wholesale-' + encodeURIComponent(k.trim().replace(/\s+/g, '-')) + '.html'; },
+      isSearch: function () { return /\/w\/wholesale-/.test(location.pathname); },
+      goods: function (h) { var m = h.match(/\/item\/(\d{8,})\.html/); return m ? m[1] : null; },
+      store: function (h) { var m = h.match(/\/store\/(\d{4,})/); return m ? m[1] : null; },
+      hi: stripSuffix
+    }
+  };
+  var PKEY = null;
+  for (var pk in PLATFORMS) if (PLATFORMS[pk].host.test(location.hostname)) { PKEY = pk; break; }
+  if (!PKEY) return;
+  var PLAT = PLATFORMS[PKEY];
+
+  var MULT = { '万': 10000, '萬': 10000, 'w': 10000, '千': 1000, 'k': 1000, 'rb': 1000, 'พัน': 1000, 'หมื่น': 10000, 'm': 1000000, 'jt': 1000000 };
+  var UNIT = '(万|萬|千|rb|พัน|หมื่น|jt|[kwm])?';
+  var SOLD_WORDS = '(?:sold|bought|verkauft|vendus?|vendidos?|venduti|verkocht|sprzedano|terjual|ขายแล้ว|đã bán|販売済み?|点販売|已售出?|售出|件已售)';
   var SALES_RES = [
-    new RegExp('(\\d[\\d.,]*)\\s*(万|千|[kKwWmM])?\\s*\\+?\\s*(?:件|个|点)?\\s*' + SOLD_WORDS, 'i'),
-    new RegExp(SOLD_WORDS + '\\s*(\\d[\\d.,]*)\\s*(万|千|[kKwWmM])?\\s*\\+?', 'i')
+    new RegExp('(\\d[\\d.,]*)\\s*' + UNIT + '\\s*\\+?\\s*(?:件|个|個|点)?\\s*' + SOLD_WORDS, 'i'),
+    new RegExp(SOLD_WORDS + '\\s*(\\d[\\d.,]*)\\s*' + UNIT + '\\s*\\+?', 'i')
   ];
-  var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Mostra altro|もっと見る)/i;
-  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック/i;
-  var FEMALE_WORDS = ['女装', '女士', '女款', '女式', '女性', '女生', '女', "women's", 'womens', 'women', 'woman', 'ladies', 'lady', 'female', 'damen', 'femme', 'mujer', 'donna', 'レディース'];
-  var MALE_WORDS = ['男装', '男士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'メンズ'];
+  var REVIEW_RES = [
+    /\((\d[\d.,]*)\s*([kK])?\+?\)/,
+    /(\d[\d.,]*)\s*([kK])?\s*(?:reviews?|ratings?|bewertungen|avis|valutazioni|reseñas|valoraciones|件の評価|評価)/i
+  ];
+  var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม)/i;
+  var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
+  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]/i;
+  var FEMALE_WORDS = ['女装', '女士', '女款', '女式', '女性', '女生', '女', "women's", 'womens', 'women', 'woman', 'ladies', 'lady', 'female', 'damen', 'femme', 'mujer', 'donna', 'feminina', 'wanita', 'レディース'];
+  var MALE_WORDS = ['男装', '男士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'masculina', 'pria', 'メンズ'];
 
   var DEFAULTS = {
     apiBase: '', appId: '', secret: '', arkKey: '', arkModel: 'doubao-seed-1-6-250615',
-    minSales: 100, target: 60, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
+    minSales: 100, target: 60, maxPages: 5, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
     enterStore: true, storeCount: 3, storeTarget: 30,
     saveOriginal: true, crop: true, matting: true, dress: false, stanceId: '', backgroundId: '', dressAr: '3:4', dressNum: 1,
     lingtuTitle: false, aiCheck: false, aiVision: true,
     skipWords: DEFAULT_SKIP.join('，'), removeWords: DEFAULT_REMOVE.join('，'),
-    countries: {}
+    sites: {}
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
-  COUNTRIES.forEach(function (c) {
-    var cur = cfg.countries[c.code] || {};
-    cfg.countries[c.code] = { on: cur.on != null ? cur.on : c.code === 'us', keyword: cur.keyword || c[cfg.gender] };
+  var oldCountries = cfg.countries || {};
+  cfg.sites = Object.assign({}, cfg.sites);
+  SITES.forEach(function (s) {
+    var cur = cfg.sites[s.id] || (s.p === 'temu' ? oldCountries[s.id.slice(5)] : null) || {};
+    cfg.sites[s.id] = { on: cur.on != null ? cur.on : s.id === 'temu-us', keyword: cur.keyword || s[cfg.gender] };
   });
+  delete cfg.countries;
   var done = new Set(GM_getValue('done', []));
   var records = GM_getValue('records', []);
   var queue = [], working = 0, running = false;
@@ -85,15 +238,23 @@ const COLLECTOR_BODY = String.raw`
   function today() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function safe(s) { return String(s).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40); }
   function pending() { return queue.length + working; }
-  function countryBy(code) { for (var i = 0; i < COUNTRIES.length; i++) if (COUNTRIES[i].code === code) return COUNTRIES[i]; return COUNTRIES[0]; }
-  function currentCountry() {
-    var seg = location.pathname.split('/')[1] || '';
-    for (var i = 0; i < COUNTRIES.length; i++) if (COUNTRIES[i].prefix && COUNTRIES[i].prefix === seg) return COUNTRIES[i];
-    return COUNTRIES[0];
+  function siteBy(id) { for (var i = 0; i < SITES.length; i++) if (SITES[i].id === id) return SITES[i]; return SITES[0]; }
+  function siteLabel(s) { return PNAMES[s.p] + ' ' + s.name; }
+  function currentSite() {
+    var seg = location.pathname.split('/')[1] || '', fallback = null, plain = null;
+    for (var i = 0; i < SITES.length; i++) {
+      var s = SITES[i];
+      if (s.p !== PKEY) continue;
+      if (!fallback) fallback = s;
+      if (new URL(s.origin).hostname !== location.hostname) continue;
+      if (s.prefix && s.prefix === seg) return s;
+      if (!s.prefix && !plain) plain = s;
+    }
+    return plain || fallback;
   }
-  function searchUrl(code, keyword) {
-    var c = countryBy(code);
-    return 'https://www.temu.com/' + (c.prefix ? c.prefix + '/' : '') + 'search_result.html?search_key=' + encodeURIComponent(keyword);
+  function searchUrl(id, keyword) { var s = siteBy(id); return PLATFORMS[s.p].search(s, keyword); }
+  function hrefHas(k) {
+    try { return decodeURIComponent(location.href.replace(/\+/g, ' ')).toLowerCase().indexOf(String(k).toLowerCase()) >= 0; } catch (e) { return false; }
   }
 
   // ---------- keyword rules ----------
@@ -135,49 +296,55 @@ const COLLECTOR_BODY = String.raw`
     return t.replace(/\s{2,}/g, ' ').replace(/^[\s,，、|\/-]+|[\s,，、|\/-]+$/g, '').trim();
   }
 
-  // ---------- Temu page parsing ----------
-  function parseSales(text) {
-    for (var i = 0; i < SALES_RES.length; i++) {
-      var m = text.match(SALES_RES[i]);
-      if (!m) continue;
-      var n = parseFloat(m[1].replace(/,(?=\d{3}\b)/g, '').replace(',', '.'));
-      if (isFinite(n)) return { text: m[0].replace(/\s+/g, ' ').trim(), count: Math.round(n * (MULT[m[2]] || 1)) };
+  // ---------- page parsing ----------
+  function parseNum(m) {
+    var n = parseFloat(m[1].replace(/,(?=\d{3}\b)/g, '').replace(',', '.'));
+    return isFinite(n) ? Math.round(n * (MULT[String(m[2] || '').toLowerCase()] || 1)) : null;
+  }
+  // Sales first; platforms that hide sales (Etsy / Amazon / SHEIN) fall back to the review count.
+  function parseMetric(text) {
+    var groups = [[SALES_RES, '']];
+    if (PLAT.metric !== 'sales') groups.push([REVIEW_RES, '评价 ']);
+    for (var g = 0; g < groups.length; g++) {
+      for (var i = 0; i < groups[g][0].length; i++) {
+        var m = text.match(groups[g][0][i]);
+        if (!m) continue;
+        var n = parseNum(m);
+        if (n != null) return { text: groups[g][1] + m[0].replace(/\s+/g, ' ').trim(), count: n };
+      }
     }
     return null;
   }
-  function goodsIdFrom(href) {
-    var m = href.match(/-g-(\d{6,})\.html/) || href.match(/[?&]goods_id=(\d{6,})/);
-    return m ? m[1] : null;
-  }
-  function mallIdFrom(href) {
-    var m = href.match(/-m-(\d{6,})\.html/) || href.match(/[?&]mall_id=(\d{6,})/);
-    return m ? m[1] : null;
-  }
-  function isGoodsPage() { return /-g-\d{6,}\.html/.test(location.pathname); }
-  function isStorePage() { return !!mallIdFrom(location.href); }
+  function isGoodsPage() { return !!PLAT.goods(location.href); }
+  function isStorePage() { return !!PLAT.store(location.href); }
   function cleanImage(src) {
     if (!src || src.indexOf('data:') === 0) return null;
     try {
       var u = new URL(src, location.href);
-      if (!/(^|\.)(kwcdn\.com|temu\.com)$/i.test(u.hostname)) return null;
-      return 'https://' + u.hostname + u.pathname;
+      if (!PLAT.img.test(u.hostname)) return null;
+      return PLAT.hi('https://' + u.hostname + u.pathname + u.search);
     } catch (e) { return null; }
   }
   function distinctGoods(el) {
     var ids = {}, n = 0, links = el.querySelectorAll('a[href]');
     for (var i = 0; i < links.length; i++) {
-      var g = goodsIdFrom(links[i].href);
+      var g = PLAT.goods(links[i].href);
       if (g && !ids[g]) { ids[g] = 1; if (++n > 1) return n; }
     }
     return n;
   }
-  function findCard(a) {
-    var el = a;
+  function findCard(a, optional) {
+    var el = a, best = null;
     for (var i = 0; i < 9 && el && el !== document.body; i++) {
-      if (el.querySelector && el.querySelector('img') && parseSales(el.innerText || '')) return distinctGoods(el) <= 1 ? el : null;
+      if (distinctGoods(el) > 1) break;
+      if (el.querySelector && el.querySelector('img')) {
+        best = el;
+        var metric = parseMetric(el.innerText || '');
+        if (metric) return { el: el, metric: metric };
+      }
       el = el.parentElement;
     }
-    return null;
+    return optional && best ? { el: best, metric: null } : null;
   }
   function pickImage(card) {
     var imgs = card.querySelectorAll('img'), best = null, bestArea = 0;
@@ -190,30 +357,37 @@ const COLLECTOR_BODY = String.raw`
     }
     return best;
   }
-  function extract() {
+  function extract(optional) {
     var anchors = document.querySelectorAll('a[href]'), seen = {}, out = [];
     for (var i = 0; i < anchors.length; i++) {
-      var a = anchors[i], id = goodsIdFrom(a.href);
+      var a = anchors[i], id = PLAT.goods(a.href);
       if (!id || seen[id]) continue;
-      var card = findCard(a);
-      if (!card) continue;
+      var found = findCard(a, optional);
+      if (!found) continue;
       seen[id] = 1;
-      var sales = parseSales(card.innerText || ''), img = pickImage(card);
-      if (!sales || !img) continue;
+      var card = found.el, img = pickImage(card);
+      if (!img) continue;
+      var head = card.querySelector('h2, h3, [title]');
       var lines = (card.innerText || '').split('\n').filter(function (l) { return l.trim().length > 8; });
-      var title = (img.alt || a.getAttribute('title') || a.getAttribute('aria-label') || lines[0] || 'Temu').trim().slice(0, 200);
+      var title = ((img.alt.length > 8 ? img.alt : '') || (head && (head.getAttribute('title') || head.innerText)) || a.getAttribute('title') || a.getAttribute('aria-label') || lines[0] || PNAMES[PKEY]);
+      title = String(title).replace(/\s+/g, ' ').trim().slice(0, 200);
       var u = new URL(a.href, location.href);
-      out.push({ goodsId: id, title: title, productUrl: 'https://' + u.hostname + u.pathname, imageUrl: img.src, salesText: sales.text, salesCount: sales.count });
+      out.push({
+        goodsId: id, key: PKEY === 'temu' ? id : PKEY + '_' + id, title: title,
+        productUrl: 'https://' + u.hostname + u.pathname, imageUrl: img.src,
+        salesText: found.metric ? found.metric.text : '无销量数据', salesCount: found.metric ? found.metric.count : 0, noMetric: !found.metric
+      });
     }
     return out;
   }
   function findStoreLink() {
     var anchors = document.querySelectorAll('a[href]');
     for (var i = 0; i < anchors.length; i++) {
-      var id = mallIdFrom(anchors[i].href);
-      if (id) return { mallId: id, url: anchors[i].href };
+      var id = PLAT.store(anchors[i].href);
+      if (id) return { storeId: id, url: PLAT.storeUrl ? PLAT.storeUrl(id) : anchors[i].href };
     }
-    return null;
+    var g = PLAT.goods(location.href);
+    return PLAT.storeFromGoods && g ? PLAT.storeFromGoods(g) : null;
   }
 
   // ---------- network ----------
@@ -261,7 +435,7 @@ const COLLECTOR_BODY = String.raw`
     }
     throw new Error('灵图任务超时');
   }
-  function rid(item, step) { return (item.goodsId + '-' + step + '-' + Date.now()).slice(0, 100); }
+  function rid(item, step) { return (item.key + '-' + step + '-' + Date.now()).slice(0, 100); }
 
   async function doubao(content) {
     if (!cfg.arkKey) throw new Error('请先在「灵图/AI」里填写豆包 API Key');
@@ -310,7 +484,7 @@ const COLLECTOR_BODY = String.raw`
     return dark / n;
   }
   async function aiCheck(item) {
-    var prompt = '你是 Temu 服装上架审核员，要判断能否采集这件 T 恤的印花图案。商品标题：' + item.title +
+    var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件 T 恤的印花图案。商品标题：' + item.title +
       '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断，只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满,"notBlack":衣服主体是否不是黑色,"reason":"一句话中文原因"}，布尔值用 true/false。';
     var content = cfg.aiVision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: item.imageUrl } }]
@@ -322,9 +496,10 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- pipeline ----------
+  function markDone(item) { done.add(item.key); GM_setValue('done', Array.from(done)); }
   function markSkipped(item, reason) {
-    done.add(item.goodsId); GM_setValue('done', Array.from(done));
-    records.push({ status: '跳过', reason: reason, country: item.ctx.country.name, source: item.ctx.source, goodsId: item.goodsId, title: item.title, sales: item.salesText, salesCount: item.salesCount, productUrl: item.productUrl, imageUrl: item.imageUrl, time: new Date().toISOString() });
+    markDone(item);
+    records.push({ status: '跳过', reason: reason, country: siteLabel(item.ctx.country), source: item.ctx.source, goodsId: item.goodsId, title: item.title, sales: item.salesText, salesCount: item.salesCount, productUrl: item.productUrl, imageUrl: item.imageUrl, time: new Date().toISOString() });
     GM_setValue('records', records);
     stats.skipped++;
     log('跳过 ' + item.goodsId + '：' + reason);
@@ -342,10 +517,10 @@ const COLLECTOR_BODY = String.raw`
       if (bad) { markSkipped(item, '豆包：' + bad); return false; }
     }
 
-    var folder = 'Temu图案/' + ctx.country.name + '_' + safe(ctx.label) + '_' + today() + '/';
-    var base = folder + item.salesCount + '_' + item.goodsId;
+    var folder = '爆款图案/' + safe(siteLabel(ctx.country)) + '_' + safe(ctx.label) + '_' + today() + '/';
+    var base = folder + item.salesCount + '_' + safe(item.goodsId);
     var files = [], notes = [];
-    if (cfg.saveOriginal) { await download(item.imageUrl, base + '_原图.jpg'); files.push(base + '_原图.jpg'); }
+    if (cfg.saveOriginal) { await download(item.imageUrl, base + '_原图.' + extOf(item.imageUrl, 'jpg')); files.push(base + '_原图'); }
 
     var crops = [];
     if (cfg.crop) {
@@ -381,16 +556,16 @@ const COLLECTOR_BODY = String.raw`
     var clean = cleanTitle(item.title), aiTitle = '';
     if (cfg.lingtuTitle) {
       try {
-        var prompt = '生成一个' + ctx.country.lang + '的 Temu ' + (cfg.gender === 'men' ? '男士' : '女士') + '短袖 T 恤商品标题，突出图案元素，60-120 个字符。不要出现材质词、尺码、季节词、儿童词、' + (cfg.gender === 'men' ? '女性' : '男性') + '词、促销词和任何品牌/IP 名称。';
+        var prompt = '生成一个' + ctx.country.lang + '的 ' + PNAMES[ctx.country.p] + ' ' + (cfg.gender === 'men' ? '男士' : '女士') + '短袖 T 恤商品标题，突出图案元素，60-120 个字符。不要出现材质词、尺码、季节词、儿童词、' + (cfg.gender === 'men' ? '女性' : '男性') + '词、促销词和任何品牌/IP 名称。';
         aiTitle = cleanTitle((await lingtuJob('/aigc/title', { requestId: rid(item, 'title'), image: item.imageUrl, prompt: prompt })).text || '');
       } catch (e) { notes.push('标题生成失败：' + e.message); }
     }
     var titleFile = base + '_标题.txt';
-    await downloadText(['原标题：' + item.title, '清洗后标题：' + clean, aiTitle ? '灵图标题：' + aiTitle : '', '销量：' + item.salesText, '链接：' + item.productUrl].filter(Boolean).join('\n'), titleFile);
+    await downloadText(['平台站点：' + siteLabel(ctx.country), '原标题：' + item.title, '清洗后标题：' + clean, aiTitle ? '灵图标题：' + aiTitle : '', '销量：' + item.salesText, '链接：' + item.productUrl].filter(Boolean).join('\n'), titleFile);
     files.push(titleFile);
 
-    done.add(item.goodsId); GM_setValue('done', Array.from(done));
-    records.push({ status: '已保存', reason: notes.join('；'), country: ctx.country.name, source: ctx.source, goodsId: item.goodsId, title: item.title, cleanTitle: clean, aiTitle: aiTitle, sales: item.salesText, salesCount: item.salesCount, productUrl: item.productUrl, imageUrl: item.imageUrl, files: files.join(' | '), time: new Date().toISOString() });
+    markDone(item);
+    records.push({ status: '已保存', reason: notes.join('；'), country: siteLabel(ctx.country), source: ctx.source, goodsId: item.goodsId, title: item.title, cleanTitle: clean, aiTitle: aiTitle, sales: item.salesText, salesCount: item.salesCount, productUrl: item.productUrl, imageUrl: item.imageUrl, files: files.join(' | '), time: new Date().toISOString() });
     GM_setValue('records', records);
     notes.forEach(function (n) { log(item.goodsId + ' ' + n, true); });
     return true;
@@ -419,13 +594,13 @@ const COLLECTOR_BODY = String.raw`
     }
   }
   function scan(ctx) {
-    var all = extract(), fresh = 0;
+    var all = extract(ctx.optional), fresh = 0;
     stats.found = Math.max(stats.found, all.length);
     all.forEach(function (x) {
       if (ctx.seen.has(x.goodsId)) return;
       ctx.seen.add(x.goodsId);
       fresh++;
-      if (x.salesCount < cfg.minSales) return;
+      if (!x.noMetric && x.salesCount < cfg.minSales) return;
       var hit = findHit(x.title, skipList);
       if (hit) { stats.skipped++; log('跳过 ' + x.goodsId + '：标题含「' + hit + '」'); return; }
       if (cfg.blackOnly && !cfg.pixelCheck && !BLACK_RE.test(x.title)) return;
@@ -433,12 +608,13 @@ const COLLECTOR_BODY = String.raw`
       x.black = BLACK_RE.test(x.title);
       ctx.candidates.push(x);
       stats.candidates++;
-      if (!done.has(x.goodsId)) ctx.backlog.push(x);
+      if (!done.has(x.key)) ctx.backlog.push(x);
     });
     ctx.backlog.sort(function (a, b) { return (b.black - a.black) || (b.salesCount - a.salesCount); });
     render();
     return fresh;
   }
+  function visible(el) { return el.offsetParent !== null && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; }
   function clickMore() {
     var els = document.querySelectorAll('button, [role="button"], div, span, a');
     for (var i = 0; i < els.length; i++) {
@@ -447,12 +623,28 @@ const COLLECTOR_BODY = String.raw`
     }
     return false;
   }
+  function clickNext() {
+    var els = document.querySelectorAll(NEXT_SEL);
+    for (var i = 0; i < els.length; i++) if (visible(els[i])) { els[i].click(); return true; }
+    return false;
+  }
   async function collectPage(ctx) {
-    var idle = 0;
+    var idle = 0, t = ctx.task;
     while (running && ctx.saved < ctx.target) {
       fill(ctx);
       if (ctx.backlog.length) { await sleep(800); continue; }
-      if (idle >= 6) { if (!pending()) break; await sleep(800); continue; }
+      if (idle >= 6) {
+        if (pending()) { await sleep(800); continue; }
+        // Paginated sites: go to the next page. Full reloads resume from t.page / t.carry; SPA pages just keep scanning.
+        if ((t.page || 0) < cfg.maxPages - 1 && clickNext()) {
+          t.page = (t.page || 0) + 1; t.carry = ctx.saved; setJob(ctx.job);
+          log('翻到第 ' + (t.page + 1) + ' 页');
+          idle = 0;
+          await sleep(3500 + Math.random() * 1500);
+          continue;
+        }
+        break;
+      }
       if (scan(ctx) > 0) { idle = 0; continue; }
       idle++;
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
@@ -461,27 +653,28 @@ const COLLECTOR_BODY = String.raw`
     }
     if (!running) queue.length = 0;
     while (pending()) await sleep(800);
-    log(ctx.source + '完成：本页保存 ' + ctx.saved + ' 个' + (ctx.saved < ctx.target ? '（没有更多达标商品）' : ''));
+    log(ctx.source + '完成：本次保存 ' + ctx.saved + ' 个' + (ctx.saved < ctx.target ? '（没有更多达标商品）' : ''));
   }
 
-  // ---------- multi-page job (survives page navigation) ----------
+  // ---------- multi-page job (survives page navigation, across platforms) ----------
+  var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
   function taskLabel(t) {
-    if (t.type === 'search') return countryBy(t.country).name + '搜索「' + t.keyword + '」';
-    if (t.type === 'goods') return '商品 ' + t.goodsId + ' → 找店铺';
-    if (t.type === 'store') return '店铺 ' + t.mallId;
+    if (t.type === 'search') return siteLabel(siteBy(t.site)) + ' 搜索「' + t.keyword + '」';
+    if (t.type === 'goods') return PNAMES[siteBy(t.site).p] + ' 商品 ' + t.goodsId + ' → 找店铺';
+    if (t.type === 'store') return PNAMES[siteBy(t.site).p] + ' 店铺 ' + t.storeId;
     return '当前页';
   }
-  function taskUrl(t) { return t.type === 'search' ? searchUrl(t.country, t.keyword) : t.url; }
+  function taskUrl(t) { return t.type === 'search' ? searchUrl(t.site, t.keyword) : t.url; }
   function onTaskPage(t) {
-    if (t.type === 'search') {
-      var key = new URLSearchParams(location.search).get('search_key') || '';
-      return /search_result/.test(location.pathname) && currentCountry().code === t.country && (t.navigated || key === t.keyword);
-    }
-    if (t.type === 'goods') return location.pathname.indexOf(t.goodsId) >= 0;
-    if (t.type === 'store') return location.href.indexOf(t.mallId) >= 0;
-    return location.pathname === t.path;
+    if (t.type === 'here') return location.pathname === t.path;
+    if (siteBy(t.site).p !== PKEY) return false;
+    if (t.type === 'search') return currentSite().id === t.site && PLAT.isSearch() && (!!t.navigated || hrefHas(t.keyword));
+    if (t.type === 'goods') return PLAT.goods(location.href) === t.goodsId;
+    // Some stores (e.g. Shopee /shop/123) redirect to a vanity URL, so accept any non-search, non-product page after navigating.
+    if (t.type === 'store') return PLAT.store(location.href) === t.storeId || (!!t.navigated && !PLAT.isSearch() && !PLAT.goods(location.href));
+    return false;
   }
   async function waitFor(fn, ms) {
     for (var t = 0; t < ms; t += 500) { if (fn()) return true; await sleep(500); }
@@ -492,31 +685,51 @@ const COLLECTOR_BODY = String.raw`
       await waitFor(findStoreLink, 15000);
       var link = findStoreLink();
       if (!link) { log('商品 ' + t.goodsId + ' 没找到店铺入口', true); return; }
-      if (job.visitedStores.indexOf(link.mallId) >= 0) { log('店铺 ' + link.mallId + ' 已采过，跳过'); return; }
-      job.visitedStores.push(link.mallId);
-      job.tasks.splice(job.idx + 1, 0, { type: 'store', mallId: link.mallId, url: link.url, country: t.country });
+      var sk = PKEY + ':' + link.storeId;
+      if (job.visitedStores.indexOf(sk) >= 0) { log('店铺 ' + link.storeId + ' 已采过，跳过'); return; }
+      job.visitedStores.push(sk);
+      job.tasks.splice(job.idx + 1, 0, { type: 'store', site: t.site, storeId: link.storeId, url: link.url });
       return;
     }
-    await waitFor(function () { return extract().length > 0; }, 15000);
-    var country = currentCountry();
+    var optional = PLAT.metric === 'optional' || t.type === 'store';
+    if (!(await waitFor(function () { return extract(optional).length > 0; }, 15000))) {
+      t.empty = (t.empty || 0) + 1;
+      if (t.empty === 1) { log('「' + taskLabel(t) + '」没识别到商品：可能要先登录，或出现了验证码。在页面上处理好后点「继续」', true); running = false; return; }
+      log('仍然没识别到商品，跳过「' + taskLabel(t) + '」', true);
+      return;
+    }
+    var site = t.site ? siteBy(t.site) : currentSite();
     var ctx = {
-      country: country, saved: 0, backlog: [], seen: new Set(), candidates: [],
+      country: site, task: t, job: job, optional: optional,
+      saved: t.carry || 0, backlog: [], seen: new Set(), candidates: [],
       target: t.type === 'store' ? cfg.storeTarget : cfg.target,
-      source: t.type === 'store' ? '店铺' + t.mallId : t.type === 'search' ? country.name + '搜索' : '当前页',
-      label: t.type === 'search' ? t.keyword : t.type === 'store' ? '店铺' + t.mallId : (new URLSearchParams(location.search).get('search_key') || '当前页')
+      source: t.type === 'store' ? '店铺' + t.storeId : t.type === 'search' ? siteLabel(site) + '搜索' : '当前页',
+      label: t.type === 'search' ? t.keyword : t.type === 'store' ? '店铺' + t.storeId : (PLAT.isSearch() ? '搜索页' : '当前页')
     };
     await collectPage(ctx);
     if (!running || t.type !== 'search' || !cfg.enterStore) return;
     var picks = ctx.candidates.slice().sort(function (a, b) { return (b.black - a.black) || (b.salesCount - a.salesCount); })
-      .filter(function (x) { return job.visitedGoods.indexOf(x.goodsId) < 0; }).slice(0, cfg.storeCount);
-    picks.forEach(function (x, i) {
-      job.visitedGoods.push(x.goodsId);
-      job.tasks.splice(job.idx + 1 + i, 0, { type: 'goods', goodsId: x.goodsId, url: x.productUrl, country: t.country });
+      .filter(function (x) { return job.visitedGoods.indexOf(x.key) < 0; }).slice(0, cfg.storeCount);
+    var added = 0;
+    picks.forEach(function (x) {
+      job.visitedGoods.push(x.key);
+      var task;
+      if (PLAT.storeFromGoods) {
+        var st = PLAT.storeFromGoods(x.goodsId), key = PKEY + ':' + st.storeId;
+        if (job.visitedStores.indexOf(key) >= 0) return;
+        job.visitedStores.push(key);
+        task = { type: 'store', site: t.site, storeId: st.storeId, url: st.url };
+      } else {
+        task = { type: 'goods', site: t.site, goodsId: x.goodsId, url: x.productUrl };
+      }
+      job.tasks.splice(job.idx + 1 + added, 0, task);
+      added++;
     });
-    if (picks.length) log('将进入 ' + picks.length + ' 个高销量商品的店铺继续采集');
+    if (added) log('将进入 ' + added + ' 个高销量商品的店铺继续采集');
   }
   async function runJob() {
     var job = getJob();
+    if (job && job.v !== JOB_VERSION) { setJob(null); job = null; }
     if (!job || job.paused) { render(); return; }
     running = true; render();
     while (job.idx < job.tasks.length) {
@@ -540,20 +753,20 @@ const COLLECTOR_BODY = String.raw`
     render();
   }
   function startJob(tasks) {
-    setJob({ tasks: tasks, idx: 0, paused: false, visitedGoods: [], visitedStores: [] });
+    setJob({ v: JOB_VERSION, tasks: tasks, idx: 0, paused: false, visitedGoods: [], visitedStores: [] });
     runJob();
   }
   function pause() { running = false; var j = getJob(); if (j) { j.paused = true; setJob(j); } render(); }
 
-  async function recommendCountries() {
-    var list = COUNTRIES.map(function (c) { return c.code + '=' + c.name; }).join('，');
-    log('正在问豆包哪些国家黑色印花 T 恤卖得好…');
-    var r = await doubao('我在 Temu 卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的国家站点采集爆款图案。请从这些站点里推荐 3-5 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"countries":["站点代码"],"reason":"一句话中文原因"}');
-    var codes = (r.countries || []).map(function (x) { return String(x).toLowerCase(); });
-    COUNTRIES.forEach(function (c) { cfg.countries[c.code].on = codes.indexOf(c.code) >= 0; });
-    if (!codes.length) cfg.countries.us.on = true;
-    save(); syncCountries();
-    log('豆包推荐：' + codes.map(function (c) { return countryBy(c).name; }).join('、') + (r.reason ? '。' + r.reason : ''));
+  async function recommendSites() {
+    var list = SITES.map(function (s) { return s.id + '=' + siteLabel(s); }).join('，');
+    log('正在问豆包哪些平台和国家黑色印花 T 恤卖得好…');
+    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的平台和国家站点采集爆款图案。请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
+    var ids = (r.sites || r.countries || []).map(function (x) { return String(x).toLowerCase(); });
+    SITES.forEach(function (s) { cfg.sites[s.id].on = ids.indexOf(s.id) >= 0; });
+    if (!ids.some(function (id) { return cfg.sites[id]; })) cfg.sites['temu-us'].on = true;
+    save(); syncSites();
+    log('豆包推荐：' + ids.filter(function (id) { return cfg.sites[id]; }).map(function (id) { return siteLabel(siteBy(id)); }).join('、') + (r.reason ? '。' + r.reason : ''));
   }
   async function loadDressLists() {
     var stances = await lingtu('/aigc/dress/stances', null, 'GET');
@@ -572,10 +785,10 @@ const COLLECTOR_BODY = String.raw`
 
   function exportCsv() {
     var cols = ['status', 'reason', 'country', 'source', 'goodsId', 'title', 'cleanTitle', 'aiTitle', 'sales', 'salesCount', 'productUrl', 'imageUrl', 'files', 'time'];
-    var head = ['状态', '原因/备注', '国家', '来源', '商品ID', '原标题', '清洗后标题', '灵图标题', '销量', '销量数值', '商品链接', '图片链接', '文件', '时间'];
+    var head = ['状态', '原因/备注', '平台站点', '来源', '商品ID', '原标题', '清洗后标题', '灵图标题', '销量', '销量数值', '商品链接', '图片链接', '文件', '时间'];
     var rows = [head.join(',')].concat(records.map(function (r) { return cols.map(function (k) { return '"' + String(r[k] == null ? '' : r[k]).replace(/"/g, '""') + '"'; }).join(','); }));
     var url = URL.createObjectURL(new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv' }));
-    GM_download({ url: url, name: 'Temu图案/采集记录_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
+    GM_download({ url: url, name: '爆款图案/采集记录_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
   }
 
   // ---------- panel ----------
@@ -590,28 +803,32 @@ const COLLECTOR_BODY = String.raw`
   function tabBtn(k, label) { return '<button data-tab="' + k + '" style="flex:1;padding:5px 0;border:0;border-bottom:2px solid transparent;background:none;color:inherit;cursor:pointer;font:inherit">' + label + '</button>'; }
   function hint(t) { return '<p style="margin:2px 0 8px;font-size:11px;color:' + C.dim + '">' + t + '</p>'; }
 
-  var countryRows = COUNTRIES.map(function (c) {
-    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input type="checkbox" data-c="' + c.code + '" aria-label="' + c.name + '"><span style="width:56px;flex:none">' + c.name + '</span><input data-ck="' + c.code + '" aria-label="' + c.name + '关键词" style="' + inputCss + '"></div>';
+  var siteRows = Object.keys(PLATFORMS).map(function (p) {
+    var rows = SITES.filter(function (s) { return s.p === p; }).map(function (s) {
+      return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input type="checkbox" data-c="' + s.id + '" aria-label="' + siteLabel(s) + '"><span style="width:60px;flex:none">' + s.name + '</span><input data-ck="' + s.id + '" aria-label="' + siteLabel(s) + '关键词" style="' + inputCss + '"></div>';
+    }).join('');
+    return '<details data-plat="' + p + '" style="margin-bottom:6px;border-bottom:1px solid ' + C.line + ';padding-bottom:4px"><summary style="cursor:pointer;padding:3px 0"><strong>' + PNAMES[p] + '</strong> <span data-pc="' + p + '" style="font-size:11px;color:' + C.dim + '"></span></summary><div style="padding-top:4px">' + rows + '</div></details>';
   }).join('');
 
   var host = document.createElement('div');
-  host.setAttribute('style', 'position:fixed;right:20px;bottom:20px;z-index:2147483647;width:340px;background:' + C.bg + ';color:' + C.text + ';font:13px/1.5 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.4);padding:14px');
+  host.setAttribute('style', 'position:fixed;right:20px;bottom:20px;z-index:2147483647;width:350px;background:' + C.bg + ';color:' + C.text + ';font:13px/1.5 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.4);padding:14px');
   host.innerHTML =
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong style="font-size:14px">爆款图案采集 → 灵图</strong>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong style="font-size:14px">爆款图案采集 → 灵图 · ' + PNAMES[PKEY] + '</strong>' +
       '<button data-k="min" aria-label="收起" style="background:none;border:0;color:' + C.dim + ';cursor:pointer;font-size:16px">–</button></div>' +
     '<div data-k="body">' +
-      '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '国家') + tabBtn('filter', '过滤') + tabBtn('api', '灵图/AI') + '</div>' +
+      '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '平台/站点') + tabBtn('filter', '过滤') + tabBtn('api', '灵图/AI') + '</div>' +
       '<div style="max-height:52vh;overflow:auto;padding-right:2px">' +
         '<div data-pane="main">' +
-          row(field('最低销量', input('minSales', 'type="number" min="1"')), field('每次搜索采集', input('target', 'type="number" min="1"'))) +
+          row(field('最低销量/评价数', input('minSales', 'type="number" min="1"')), field('每次搜索采集', input('target', 'type="number" min="1"'))) +
           row(field('卖', '<select data-k="gender" style="' + inputCss + '"><option value="men">男装</option><option value="women">女装</option></select>'), field('进店数量', input('storeCount', 'type="number" min="0"'))) +
-          row(field('每家店采集', input('storeTarget', 'type="number" min="1"')), '<div style="flex:1"></div>') +
+          row(field('每家店采集', input('storeTarget', 'type="number" min="1"')), field('最多翻页', input('maxPages', 'type="number" min="1"'))) +
           check('blackOnly', '只要黑色款（同一色系）') +
           check('enterStore', '高销量商品自动进店铺继续采集') +
+          hint('Etsy / Amazon 卡片不显示销量，用评价数代替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。') +
         '</div>' +
         '<div data-pane="country" style="display:none">' +
-          hint('勾选要采集的国家，会按顺序逐个国家搜索。关键词可改。') + countryRows +
-          '<button data-k="recommend" style="' + btnCss + ';width:100%;margin-top:4px">问豆包：黑 T 在哪些国家卖得多</button>' +
+          hint('勾选要采集的平台和国家站点，会按顺序逐个搜索，跨平台也会自动跳转。请先在这个浏览器里手动登录这些网站。关键词可改。') + siteRows +
+          '<button data-k="recommend" style="' + btnCss + ';width:100%;margin-top:4px">问豆包：黑 T 在哪些平台/国家卖得多</button>' +
         '</div>' +
         '<div data-pane="filter" style="display:none">' +
           check('pixelCheck', '检测图片：非黑色 / 印花太满的不要') +
@@ -640,7 +857,7 @@ const COLLECTOR_BODY = String.raw`
           '<button data-k="clear" style="' + linkCss + ';margin-top:6px">清空已采集记录（允许重复采集）</button>' +
         '</div>' +
       '</div>' +
-      '<div style="display:flex;gap:6px;margin:10px 0 6px"><button data-k="start" style="' + btnCss + ';border:0;background:' + C.blue + ';color:#fff">开始多国采集</button>' +
+      '<div style="display:flex;gap:6px;margin:10px 0 6px"><button data-k="start" style="' + btnCss + ';border:0;background:' + C.blue + ';color:#fff">开始多站点采集</button>' +
         '<button data-k="here" style="' + btnCss + '">只采当前页</button></div>' +
       '<div style="display:flex;gap:6px;margin-bottom:6px"><button data-k="store" style="' + btnCss + ';display:none">进入本店采集</button>' +
         '<button data-k="pause" style="' + btnCss + '">暂停</button><button data-k="end" style="' + btnCss + '">结束任务</button><button data-k="csv" style="' + btnCss + '">导出 CSV</button></div>' +
@@ -649,7 +866,7 @@ const COLLECTOR_BODY = String.raw`
       '<div data-k="log" style="margin-top:6px;max-height:110px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;color:' + C.dim + '"></div>' +
     '</div>';
   host.id = 'temu-lingtu-collector-panel';
-  // Temu re-renders <body> during hydration and drops foreign nodes, so mount on <html> and re-attach if removed.
+  // Some sites re-render <body> during hydration and drop foreign nodes, so mount on <html> and re-attach if removed.
   function mountPanel() {
     if (!host.isConnected) (document.documentElement || document.body).appendChild(host);
     host.style.display = '';
@@ -672,17 +889,27 @@ const COLLECTOR_BODY = String.raw`
   host.querySelectorAll('[data-tab]').forEach(function (b) { b.onclick = function () { showTab(b.getAttribute('data-tab')); }; });
   showTab(lingtuReady() ? 'main' : 'api');
 
-  function syncCountries() {
-    COUNTRIES.forEach(function (c) {
-      host.querySelector('[data-c="' + c.code + '"]').checked = cfg.countries[c.code].on;
-      host.querySelector('[data-ck="' + c.code + '"]').value = cfg.countries[c.code].keyword;
+  function syncCounts() {
+    Object.keys(PLATFORMS).forEach(function (p) {
+      var n = SITES.filter(function (s) { return s.p === p && cfg.sites[s.id].on; }).length;
+      host.querySelector('[data-pc="' + p + '"]').textContent = n ? '已选 ' + n : '';
     });
   }
-  COUNTRIES.forEach(function (c) {
-    host.querySelector('[data-c="' + c.code + '"]').onchange = function (e) { cfg.countries[c.code].on = e.target.checked; save(); };
-    host.querySelector('[data-ck="' + c.code + '"]').onchange = function (e) { cfg.countries[c.code].keyword = e.target.value.trim() || c[cfg.gender]; e.target.value = cfg.countries[c.code].keyword; save(); };
+  function syncSites() {
+    SITES.forEach(function (s) {
+      host.querySelector('[data-c="' + s.id + '"]').checked = cfg.sites[s.id].on;
+      host.querySelector('[data-ck="' + s.id + '"]').value = cfg.sites[s.id].keyword;
+    });
+    Object.keys(PLATFORMS).forEach(function (p) {
+      host.querySelector('[data-plat="' + p + '"]').open = p === PKEY || SITES.some(function (s) { return s.p === p && cfg.sites[s.id].on; });
+    });
+    syncCounts();
+  }
+  SITES.forEach(function (s) {
+    host.querySelector('[data-c="' + s.id + '"]').onchange = function (e) { cfg.sites[s.id].on = e.target.checked; save(); syncCounts(); };
+    host.querySelector('[data-ck="' + s.id + '"]').onchange = function (e) { cfg.sites[s.id].keyword = e.target.value.trim() || s[cfg.gender]; e.target.value = cfg.sites[s.id].keyword; save(); };
   });
-  syncCountries();
+  syncSites();
 
   ['apiBase', 'appId', 'secret', 'arkKey', 'arkModel', 'skipWords', 'removeWords', 'dressAr'].forEach(function (k) {
     $(k).value = cfg[k];
@@ -692,7 +919,7 @@ const COLLECTOR_BODY = String.raw`
     if (cfg[k]) $(k).innerHTML = '<option value="' + cfg[k] + '">已选 ' + cfg[k] + '</option>';
     $(k).onchange = function () { cfg[k] = $(k).value; save(); };
   });
-  ['minSales', 'target', 'storeCount', 'storeTarget', 'darkMin', 'dressNum'].forEach(function (k) {
+  ['minSales', 'target', 'maxPages', 'storeCount', 'storeTarget', 'darkMin', 'dressNum'].forEach(function (k) {
     $(k).value = cfg[k];
     $(k).onchange = function () { var v = parseInt($(k).value, 10); cfg[k] = isFinite(v) && v >= 0 ? v : DEFAULTS[k]; $(k).value = cfg[k]; save(); };
   });
@@ -704,8 +931,8 @@ const COLLECTOR_BODY = String.raw`
   $('gender').onchange = function () {
     var prev = cfg.gender;
     cfg.gender = $('gender').value;
-    COUNTRIES.forEach(function (c) { if (cfg.countries[c.code].keyword === c[prev]) cfg.countries[c.code].keyword = c[cfg.gender]; });
-    save(); syncCountries();
+    SITES.forEach(function (s) { if (cfg.sites[s.id].keyword === s[prev]) cfg.sites[s.id].keyword = s[cfg.gender]; });
+    save(); syncSites();
   };
   $('resetWords').onclick = function () {
     cfg.skipWords = DEFAULT_SKIP.join('，'); cfg.removeWords = DEFAULT_REMOVE.join('，');
@@ -714,7 +941,7 @@ const COLLECTOR_BODY = String.raw`
   };
   $('min').onclick = function () { var b = $('body'); b.style.display = b.style.display === 'none' ? '' : 'none'; };
   $('clear').onclick = function () { if (confirm('清空后，之前采集过的商品会被重新采集，确定吗？')) { done.clear(); records = []; GM_setValue('done', []); GM_setValue('records', []); log('已清空采集记录'); } };
-  $('recommend').onclick = function () { recommendCountries().catch(function (e) { log(e.message, true); }); };
+  $('recommend').onclick = function () { recommendSites().catch(function (e) { log(e.message, true); }); };
   $('loadDress').onclick = function () { loadDressLists().catch(function (e) { log(e.message, true); }); };
 
   function preflight() {
@@ -726,22 +953,22 @@ const COLLECTOR_BODY = String.raw`
   $('start').onclick = function () {
     if (getJob()) { log('已有任务，点「暂停/继续」或先「结束任务」'); return; }
     if (!preflight()) return;
-    var tasks = COUNTRIES.filter(function (c) { return cfg.countries[c.code].on; })
-      .map(function (c) { return { type: 'search', country: c.code, keyword: cfg.countries[c.code].keyword }; });
-    if (!tasks.length) { showTab('country'); log('请至少勾选一个国家', true); return; }
+    var tasks = SITES.filter(function (s) { return cfg.sites[s.id].on; })
+      .map(function (s) { return { type: 'search', site: s.id, keyword: cfg.sites[s.id].keyword }; });
+    if (!tasks.length) { showTab('country'); log('请至少勾选一个站点', true); return; }
     startJob(tasks);
   };
   $('here').onclick = function () {
     if (getJob()) { log('已有任务，请先「结束任务」'); return; }
     if (!preflight()) return;
-    startJob([{ type: 'here', path: location.pathname }]);
+    startJob([{ type: 'here', site: currentSite().id, path: location.pathname }]);
   };
   $('store').onclick = function () {
     if (getJob()) { log('已有任务，请先「结束任务」'); return; }
     if (!preflight()) return;
     var link = findStoreLink();
     if (!link) { log('这个页面没找到店铺入口', true); return; }
-    startJob([{ type: 'store', mallId: link.mallId, url: link.url, country: currentCountry().code }]);
+    startJob([{ type: 'store', site: currentSite().id, storeId: link.storeId, url: link.url }]);
   };
   $('pause').onclick = function () {
     var j = getJob();
@@ -765,28 +992,36 @@ const COLLECTOR_BODY = String.raw`
     $('pause').disabled = !j;
     $('store').style.display = isGoodsPage() && !j ? '' : 'none';
     $('job').textContent = j ? '任务 ' + Math.min(j.idx + 1, j.tasks.length) + '/' + j.tasks.length + '：' + (j.tasks[j.idx] ? taskLabel(j.tasks[j.idx]) : '收尾') + (j.paused ? '（已暂停）' : '') : '没有进行中的任务';
-    $('stats').textContent = currentCountry().name + ' · 识别 ' + stats.found + ' · 达标 ' + stats.candidates + ' · 跳过 ' + stats.skipped + ' · 保存 ' + stats.saved + ' · 失败 ' + stats.failed + ' · 排队 ' + pending() + ' · 累计 ' + done.size;
+    $('stats').textContent = siteLabel(currentSite()) + ' · 识别 ' + stats.found + ' · 达标 ' + stats.candidates + ' · 跳过 ' + stats.skipped + ' · 保存 ' + stats.saved + ' · 失败 ' + stats.failed + ' · 排队 ' + pending() + ' · 累计 ' + done.size;
   }
 
   compileRules();
   render();
-  log('就绪 · 当前站点：' + currentCountry().name + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
 
 export function buildUserscript() {
-  const body = COLLECTOR_BODY.replace('__COUNTRIES__', () => JSON.stringify(COUNTRIES))
+  const body = COLLECTOR_BODY.replace('__SITES__', () => JSON.stringify(SITES))
+    .replace('__PNAMES__', () => JSON.stringify(PLATFORM_NAMES))
     .replace('__SKIP__', () => JSON.stringify(DEFAULT_SKIP_WORDS))
     .replace('__REMOVE__', () => JSON.stringify(DEFAULT_REMOVE_WORDS))
+  const hosts = new Set(SITES.map((s) => new URL(s.origin).hostname))
+  const matches = [
+    ...Array.from(hosts, (h) => 'https://' + h + '/*'),
+    'https://*.temu.com/*',
+    'https://*.shein.com/*',
+    'https://*.etsy.com/*',
+    'https://*.aliexpress.com/*',
+  ]
   return [
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      3.0.1',
-    '// @description  多国家采集 Temu 高销量黑色 T 恤图案，过滤违规词/双面/满印，进店继续采，灵图裁剪+抠图+套图，保存到电脑',
-    '// @match        https://www.temu.com/*',
-    '// @match        https://*.temu.com/*',
+    '// @version      4.0.0',
+    '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家采集高销量黑色 T 恤图案，过滤违规词/双面/满印，进店继续采，灵图裁剪+抠图+套图，保存到电脑',
+    ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
     '// @grant        GM_download',
     '// @grant        GM_getValue',
