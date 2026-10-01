@@ -256,6 +256,27 @@ const COLLECTOR_BODY = String.raw`
     }
     return plain || fallback;
   }
+  var TEMU_CUR = { us: 'USD', uk: 'GBP', ca: 'CAD', au: 'AUD', de: 'EUR', fr: 'EUR', it: 'EUR', es: 'EUR', mx: 'MXN', jp: 'JPY' };
+  var TEMU_CN = { '美国': 'us', '英国': 'uk', '加拿大': 'ca', '澳大利亚': 'au', '德国': 'de', '法国': 'fr', '意大利': 'it', '西班牙': 'es', '墨西哥': 'mx', '日本': 'jp' };
+  function temuRealRegion() {
+    var txt = (document.body && document.body.textContent) || '';
+    var m = txt.match(/所在站点为\s*Temu\s*([\u4e00-\u9fa5]{2,4})/);
+    if (m && TEMU_CN[m[1]]) return { code: TEMU_CN[m[1]], how: 'site' };
+    var c = txt.match(/\b(USD|GBP|EUR|JPY|CAD|AUD|MXN)\s*:\s*\S/);
+    if (c) return { cur: c[1], how: 'currency' };
+    var counts = { GBP: (txt.match(/£\s?\d/g) || []).length, EUR: (txt.match(/€\s?\d|\d\s?€/g) || []).length, JPY: (txt.match(/[¥￥]\s?\d/g) || []).length };
+    var best = null;
+    for (var k in counts) if (counts[k] >= 3 && (!best || counts[k] > counts[best])) best = k;
+    return best ? { cur: best, how: 'price' } : null;
+  }
+  function temuRegionMismatch(siteId) {
+    var want = siteId.replace(/^temu-/, ''), real = temuRealRegion();
+    if (!real) return null;
+    if (real.code) return real.code === want ? null : real.code;
+    if (real.cur === TEMU_CUR[want]) return null;
+    for (var k in TEMU_CUR) if (TEMU_CUR[k] === real.cur) return k;
+    return null;
+  }
   function searchUrl(id, keyword) { var s = siteBy(id); return PLATFORMS[s.p].search(s, keyword); }
   function hrefHas(k) {
     try { return decodeURIComponent(location.href.replace(/\+/g, ' ')).toLowerCase().indexOf(String(k).toLowerCase()) >= 0; } catch (e) { return false; }
@@ -791,6 +812,17 @@ const COLLECTOR_BODY = String.raw`
         location.href = taskUrl(t);
         return;
       }
+      if (PKEY === 'temu' && t.site) {
+        await sleep(2000);
+        var wrong = temuRegionMismatch(t.site);
+        if (wrong) {
+          var realName = siteBy('temu-' + wrong).name, wantName = siteBy(t.site).name;
+          job.paused = true; t.tries = 0; t.navigated = false; setJob(job); running = false;
+          log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」。Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
+          render();
+          return;
+        }
+      }
       log('开始：' + taskLabel(t) + '（' + (job.idx + 1) + '/' + job.tasks.length + '）');
       await runTask(t, job);
       if (!running) { job.paused = true; setJob(job); render(); return; }
@@ -1040,7 +1072,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.1.0',
+    '// @version      6.2.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
