@@ -106,7 +106,7 @@ export const DEFAULT_REMOVE_WORDS = [
   '儿童', '小孩', '男孩', '女孩', '男童', '女童', '青少年', '学校',
   '卫衣', '衬衫', '连帽', '长袖', '无袖', '背心', '毛衣', '开衫', '夹克', '马甲',
   '修身', '露脐', '露肩', '运动衫', '套头衫', '外套', '拉链', '抓绒', '保暖', '摇粒绒', '加绒',
-  '亲子', '婴儿', '帽衫', '套衫', '热卖', '限时优惠', '迪士尼', '三丽鸥', '怪物猎人', 'monster hunter',
+  '亲子', '婴儿', '帽衫', '套衫', '热卖', '限时优惠', '迪士��', '三丽鸥', '怪物猎人', 'monster hunter',
   'polyester', 'fiber', 'blend', 'knit', 'knitted', 'spandex', 'elastane', '100% cotton', 'cotton', 'set',
   'kids', 'kid', 'children', 'child', 'boys', 'girls', 'boy', 'girl', 'teen', 'teens', 'youth', 'toddler', 'baby', 'school',
   'hoodie', 'hooded', 'sweatshirt', 'blouse', 'long sleeve', 'long-sleeve', 'sleeveless', 'tank top', 'vest', 'sweater',
@@ -214,7 +214,7 @@ const COLLECTOR_BODY = String.raw`
     ['zwarte', 'witte'], ['zwart', 'wit'], ['czarne', 'białe'], ['czarny', 'biały'], ['czarna', 'biała'], ['hitam', 'putih'],
     ['đen', 'trắng'], ['ดำ', 'ขาว'], ['ブラック', 'ホワイト'], ['黒', '白'], ['黑', '白'], ['black', 'white']];
   var FEMALE_WORDS = ['女装', '女士', '女款', '女式', '女性', '女生', '女', "women's", 'womens', 'women', 'woman', 'ladies', 'lady', 'female', 'damen', 'femme', 'mujer', 'donna', 'feminina', 'wanita', 'レディース'];
-  var MALE_WORDS = ['男装', '���士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'masculina', 'pria', 'メンズ'];
+  var MALE_WORDS = ['男装', '����士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'masculina', 'pria', 'メンズ'];
 
   var DEFAULTS = {
     arkKey: '', arkModel: 'doubao-seed-2-0-pro',
@@ -1053,7 +1053,12 @@ const COLLECTOR_BODY = String.raw`
   }
   async function runTask(t, job) {
     if (t.type === 'goods') {
-      await waitFor(findStoreLink, 15000);
+      var soldOut = function () {
+        var txt = ((document.body && document.body.innerText) || '').slice(0, 4000);
+        return /此商品已售罄|商品已下架|已售罄|This item is sold out|Sold out|no longer available|Ausverkauft|Épuisé|Esaurito|Agotado|Esgotado|売り切れ/i.test(txt);
+      };
+      await waitFor(function () { return findStoreLink() || soldOut(); }, 15000);
+      if (soldOut()) { log('商品 ' + t.goodsId + ' 已售罄/下架，跳过进店，继续下一个'); return; }
       var link = findStoreLink();
       if (!link) { log('商品 ' + t.goodsId + ' 没找到店铺入口', true); return; }
       var sk = PKEY + ':' + link.storeId;
@@ -1246,6 +1251,26 @@ const COLLECTOR_BODY = String.raw`
     if (s.lang === '繁体中文') return !/[\u4e00-\u9fff]/.test(kw);
     return true;
   }
+  // Offline fallback so Chinese keywords still work on English sites without a 豆包 key.
+  var ZH_EN = [
+    ['纯白色', 'plain white'], ['纯黑色', 'plain black'], ['黑色', 'black'], ['白色', 'white'], ['黑', 'black'], ['白', 'white'],
+    ['短袖', 'short sleeve'], ['长袖', 'long sleeve'], ['圆领', 'crew neck'], ['宽松', 'oversized'], ['纯棉', 'cotton'],
+    ['印花', 'graphic'], ['图案', 'graphic'], ['字母', 'letter print'], ['文字', 'text print'], ['复古', 'vintage'], ['搞笑', 'funny'],
+    ['幽默', 'funny'], ['潮流', 'streetwear'], ['街头', 'streetwear'], ['骷髅', 'skull'], ['动漫', 'anime'], ['卡通', 'cartoon'],
+    ['摇滚', 'rock'], ['乐队', 'band'], ['健身', 'gym'], ['猫', 'cat'], ['狗', 'dog'], ['龙', 'dragon'], ['老鹰', 'eagle'],
+    ['美国', 'american'], ['国旗', 'flag'], ['摩托', 'motorcycle'], ['汽车', 'car'], ['钓鱼', 'fishing'], ['游戏', 'gaming'],
+    ['T恤衫', 't shirt'], ['T恤', 't shirt'], ['t恤', 't shirt'], ['体恤', 't shirt'], ['衬衫', 't shirt'], ['上衣', 'top'],
+    ['男士', 'men'], ['男款', 'men'], ['男装', 'men'], ['男', 'men'], ['女士', 'women'], ['女款', 'women'], ['女', 'women']
+  ];
+  function localZhToEn(kw) {
+    var s = kw;
+    ZH_EN.forEach(function (p) { s = s.split(p[0]).join(' ' + p[1] + ' '); });
+    s = s.replace(/[\u4e00-\u9fff，、]+/g, ' ').replace(/\s+/g, ' ').trim();
+    var words = s.split(' '), out = [];
+    words.forEach(function (w) { if (w && out.indexOf(w) < 0) out.push(w); });
+    s = out.join(' ').replace(/\b(men|women)\b(.*)$/, '$2 $1').replace(/\s+/g, ' ').trim();
+    return s || kw;
+  }
   async function translateMany(pairs) {
     var cache = GM_getValue('kwTrans', {}), out = {}, miss = [];
     pairs.forEach(function (p) {
@@ -1281,7 +1306,7 @@ const COLLECTOR_BODY = String.raw`
       colors.forEach(function (c) {
         var seen = [];
         src[c].forEach(function (k) {
-          var kk = needsTrans(k, s) ? (tr[s.lang + '|' + k] || k) : k;
+          var kk = needsTrans(k, s) ? (tr[s.lang + '|' + k] || (s.lang === '英文' ? localZhToEn(k) : k)) : k;
           if (seen.indexOf(kk.toLowerCase()) >= 0) return;
           seen.push(kk.toLowerCase());
           tasks.push({ type: 'search', site: s.id, keyword: kk, src: k, color: c });
@@ -1819,7 +1844,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.10.0',
+    '// @version      6.10.1',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
