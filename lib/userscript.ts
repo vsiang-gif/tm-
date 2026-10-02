@@ -214,7 +214,7 @@ const COLLECTOR_BODY = String.raw`
     ['zwarte', 'witte'], ['zwart', 'wit'], ['czarne', 'białe'], ['czarny', 'biały'], ['czarna', 'biała'], ['hitam', 'putih'],
     ['đen', 'trắng'], ['ดำ', 'ขาว'], ['ブラック', 'ホワイト'], ['黒', '白'], ['黑', '白'], ['black', 'white']];
   var FEMALE_WORDS = ['女装', '女士', '女款', '女式', '女性', '女生', '女', "women's", 'womens', 'women', 'woman', 'ladies', 'lady', 'female', 'damen', 'femme', 'mujer', 'donna', 'feminina', 'wanita', 'レディース'];
-  var MALE_WORDS = ['男装', '男士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'masculina', 'pria', 'メンズ'];
+  var MALE_WORDS = ['男装', '��士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'masculina', 'pria', 'メンズ'];
 
   var DEFAULTS = {
     arkKey: '', arkModel: 'doubao-seed-2-0-pro',
@@ -447,7 +447,17 @@ const COLLECTOR_BODY = String.raw`
       if (id) return { storeId: id, url: PLAT.storeUrl ? PLAT.storeUrl(id) : anchors[i].href };
     }
     var g = PLAT.goods(location.href);
-    return PLAT.storeFromGoods && g ? PLAT.storeFromGoods(g) : null;
+    if (PLAT.storeFromGoods && g) return PLAT.storeFromGoods(g);
+    // Temu's product page often renders the store block as a clickable div with no href; the mall id is in the page data.
+    if (PKEY === 'temu') {
+      var html = document.documentElement.innerHTML;
+      var m = html.match(/["']?mall_?[iI]d["']?\s*[:=]\s*["']?(\d{6,})/) || html.match(/-m-(\d{6,})\.html/);
+      if (m) {
+        var s = currentSite();
+        return { storeId: m[1], url: location.origin + '/' + (s.prefix ? s.prefix + '/' : '') + 'mall.html?mall_id=' + m[1] };
+      }
+    }
+    return null;
   }
 
   // ---------- network ----------
@@ -994,7 +1004,16 @@ const COLLECTOR_BODY = String.raw`
         }
         break;
       }
-      if (scan(ctx) > 0) { idle = 0; lastProgress = Date.now(); continue; }
+      if (scan(ctx) > 0) {
+        idle = 0; lastProgress = Date.now();
+        // A high-sales product just showed up: finish what's queued, then leave the search to visit its store.
+        if (storePicks(ctx).length) {
+          while (pending()) await sleep(800);
+          ctx.storeBreak = true;
+          break;
+        }
+        continue;
+      }
       if (pending()) { await sleep(800); continue; }
       if (findMore() && await clickMore()) { idle = 0; lastProgress = Date.now(); continue; }
       idle++;
@@ -1076,9 +1095,12 @@ const COLLECTOR_BODY = String.raw`
     };
     await collectPage(ctx);
     if (!running || t.type !== 'search' || !cfg.enterStore) return;
-    var picks = ctx.candidates.slice().sort(function (a, b) { return b.salesCount - a.salesCount; })
-      .filter(function (x) { return !x.noMetric && x.salesCount >= cfg.storeMinSales && job.visitedGoods.indexOf(x.key) < 0; }).slice(0, cfg.storeCount);
-    if (!picks.length) { log('本页没有销量 ≥ ' + cfg.storeMinSales + ' 的商品，不进店（本页最高 ' + (ctx.maxSales || 0) + '）'); return; }
+    var picks = storePicks(ctx);
+    if (!picks.length) {
+      if ((t.storesEntered || 0) >= cfg.storeCount) log('这个关键词已进了 ' + cfg.storeCount + ' 家店（进店数量上限）');
+      else log('本页没有销量 ≥ ' + cfg.storeMinSales + ' 的商品，不进店（本页最高 ' + (ctx.maxSales || 0) + '）');
+      return;
+    }
     var added = 0;
     picks.forEach(function (x) {
       job.visitedGoods.push(x.key);
@@ -1091,11 +1113,27 @@ const COLLECTOR_BODY = String.raw`
       } else {
         task = { type: 'goods', site: t.site, goodsId: x.goodsId, url: x.productUrl, color: t.color };
       }
-      log('高销量 ' + x.goodsId + '（' + x.salesText + '）→ 进店采集');
+      log('高销量 ' + x.goodsId + '（' + x.salesText + '）≥ 门槛 ' + cfg.storeMinSales + ' → 进店采集');
       job.tasks.splice(job.idx + 1 + added, 0, task);
       added++;
     });
-    if (added) log('将进入 ' + added + ' 个高销量店铺，采完自动退出继续下一个搜索');
+    t.storesEntered = (t.storesEntered || 0) + added;
+    // Left the search early for these stores: come back to the same keyword afterwards and keep going.
+    if (ctx.storeBreak && ctx.saved < ctx.target) {
+      job.tasks.splice(job.idx + 1 + added, 0, {
+        type: 'search', site: t.site, keyword: t.keyword, user: t.user, color: t.color,
+        carry: ctx.saved, storesEntered: t.storesEntered, resumed: true
+      });
+    }
+    if (added) log('将进入 ' + added + ' 个高销量店铺，采完自动退出' + (ctx.storeBreak ? '，回到「' + t.keyword + '」继续采集' : '继续下一个搜索'));
+  }
+  function storePicks(ctx) {
+    var t = ctx.task, job = ctx.job;
+    if (!cfg.enterStore || !t || t.type !== 'search' || !job) return [];
+    var left = cfg.storeCount - (t.storesEntered || 0);
+    if (left <= 0) return [];
+    return ctx.candidates.slice().sort(function (a, b) { return b.salesCount - a.salesCount; })
+      .filter(function (x) { return !x.noMetric && x.salesCount >= cfg.storeMinSales && job.visitedGoods.indexOf(x.key) < 0; }).slice(0, left);
   }
   async function runJob() {
     var job = getJob();
@@ -1124,7 +1162,7 @@ const COLLECTOR_BODY = String.raw`
         if (wrong) {
           var realName = siteBy('temu-' + wrong).name, wantName = siteBy(t.site).name;
           if (cfg.autoResume) {
-            var fixed = await waitHuman(t, job, '当前 Temu 是「' + realName + '」站，不是「' + wantName + '」。请点页面顶部「更改国家/地区」选「' + wantName + '」', function () { return !temuRegionMismatch(t.site); });
+            var fixed = await waitHuman(t, job, '当前 Temu 是「' + realName + '」站，不是「' + wantName + '」。请点页面顶���「更改国家/地区」选「' + wantName + '」', function () { return !temuRegionMismatch(t.site); });
             if (!running) { job.paused = true; setJob(job); render(); return; }
             if (!fixed) { log('等了 30 分钟国家还没切换，跳过「' + taskLabel(t) + '」', true); job.idx++; setJob(job); continue; }
             t.navigated = true; setJob(job);
@@ -1677,7 +1715,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.7.0 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.9.0 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1699,7 +1737,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.8.0',
+    '// @version      6.9.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
