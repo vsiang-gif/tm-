@@ -131,7 +131,7 @@ const COLLECTOR_BODY = String.raw`
   var PLATFORMS = {
     temu: {
       host: /(^|\.)temu\.com$/i, img: /(^|\.)(kwcdn\.com|temu\.com)$/i, metric: 'sales',
-      search: function (s, k) { return s.origin + '/' + (s.prefix ? s.prefix + '/' : '') + 'search_result.html?search_key=' + encodeURIComponent(k); },
+      search: function (s, k) { return s.origin + '/' + (s.prefix ? s.prefix + '/' : '') + 'search_result.html?search_key=' + encodeURIComponent(k) + '&search_method=user'; },
       isSearch: function () { return /search_result/.test(location.pathname); },
       goods: function (h) { var m = h.match(/-g-(\d{6,})\.html/) || h.match(/[?&]goods_id=(\d{6,})/); return m ? m[1] : null; },
       store: function (h) { var m = h.match(/-m-(\d{6,})\.html/) || h.match(/[?&]mall_id=(\d{6,})/); return m ? m[1] : null; },
@@ -225,7 +225,8 @@ const COLLECTOR_BODY = String.raw`
     sites: {}, v: 6,
     imgDedupe: true, schedule: '', dailyCap: 0, restEvery: 30, restMin: 3, autoResume: true,
     pushType: 'none', pushKey: '', beep: true, reportTime: '22:00',
-    storeMinSales: 500, userFirst: true, colorMode: 'black', blackCount: 30, whiteCount: 30, lightMin: 35
+    storeMinSales: 500, userFirst: true, colorMode: 'black', blackCount: 30, whiteCount: 30, lightMin: 35,
+    myKeywords: '', kwTranslate: true
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
   if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
@@ -243,6 +244,7 @@ const COLLECTOR_BODY = String.raw`
     cfg.sites[s.id] = { on: cur.on != null ? cur.on : s.id === 'temu-us', keyword: cur.keyword || s[cfg.gender] };
   });
   delete cfg.countries;
+  if (!String(cfg.myKeywords || '').trim()) cfg.myKeywords = splitKeywords(cfg.sites['temu-us'].keyword || SITES[0][cfg.gender]).join('\n');
   var done = new Set(GM_getValue('done', []));
   var records = GM_getValue('records', []);
   // synced = actually sent to 灵图 (costs 灵豆) and must never be sent again; done also includes reviewed-and-skipped items.
@@ -1041,7 +1043,18 @@ const COLLECTOR_BODY = String.raw`
       return;
     }
     var optional = PLAT.metric === 'optional' || t.type === 'store';
-    if (!(await waitFor(function () { return extract(optional).length > 0; }, 15000)) && cfg.autoResume) {
+    var hasGoods = function () { return extract(optional).length > 0; };
+    var found = await waitFor(hasGoods, 15000);
+    // A URL-opened search can come back empty even though typing the same words into the site's box works.
+    if (!found && t.type === 'search' && !t.typed) {
+      t.typed = true; setJob(job);
+      log('网址搜索没出商品，改用页面搜索框重新搜「' + t.keyword + '」');
+      if (await typeSearch(t.keyword)) found = await waitFor(hasGoods, 20000);
+    }
+    if (!found && t.type === 'search' && noResultsText()) { log('「' + t.keyword + '」在' + siteLabel(siteBy(t.site)) + '确实没有结果，换下一个关键词', true); return; }
+    if (found) {
+      // keep going
+    } else if (cfg.autoResume) {
       var ok = await waitHuman(t, job, '「' + taskLabel(t) + '」没识别到商品：可能要登录或出现了验证码', function () { return extract(optional).length > 0; });
       if (!running) return;
       if (!ok) { log('等了 30 分钟没处理，跳过「' + taskLabel(t) + '」', true); return; }
@@ -1121,7 +1134,7 @@ const COLLECTOR_BODY = String.raw`
           }
           notify('Temu 国家不对', '当前是「' + realName + '」站，需要切换到「' + wantName + '」');
           job.paused = true; t.tries = 0; t.navigated = false; setJob(job); running = false;
-          log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」。Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
+          log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」��Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
           render();
           return;
         }
@@ -1157,7 +1170,10 @@ const COLLECTOR_BODY = String.raw`
   }
   function splitKeywords(s) {
     var out = [];
-    String(s || '').split(/[|｜\n;；]+/).forEach(function (k) { k = k.trim(); if (k && out.indexOf(k) < 0) out.push(k); });
+    String(s || '').split(/[|｜\n;；]+/).forEach(function (k) {
+      k = k.replace(/[\s\u3000\u00a0]+/g, ' ').replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
+      if (k && out.indexOf(k) < 0) out.push(k);
+    });
     return out;
   }
   // ---------- color phases: black only / white only / black N then white N per site ----------
@@ -1185,18 +1201,88 @@ const COLLECTOR_BODY = String.raw`
     }
     return k.trim();
   }
-  function buildTasks() {
-    var tasks = [];
-    SITES.forEach(function (s) {
-      if (!cfg.sites[s.id].on) return;
-      var kws = splitKeywords(cfg.sites[s.id].keyword || s[cfg.gender]);
-      if (cfg.colorMode !== 'white') kws.forEach(function (k) { tasks.push({ type: 'search', site: s.id, keyword: k, color: 'black' }); });
-      if (cfg.colorMode !== 'black') {
-        var seenW = [];
-        kws.map(toWhite).forEach(function (k) { if (seenW.indexOf(k) < 0) { seenW.push(k); tasks.push({ type: 'search', site: s.id, keyword: k, color: 'white' }); } });
-      }
+  // ---------- keywords: one shared list, auto-translated into each selected site's language ----------
+  function needsTrans(kw, s) {
+    if (s.lang === '英文') return !/^[\x00-\x7f]+$/.test(kw);
+    if (s.lang === '繁体中文') return !/[\u4e00-\u9fff]/.test(kw);
+    return true;
+  }
+  async function translateMany(pairs) {
+    var cache = GM_getValue('kwTrans', {}), out = {}, miss = [];
+    pairs.forEach(function (p) {
+      var key = p.lang + '|' + p.kw;
+      if (cache[key]) out[key] = cache[key];
+      else if (!miss.some(function (m) { return m.lang + '|' + m.kw === key; })) miss.push(p);
+    });
+    if (!miss.length || !cfg.kwTranslate) return out;
+    if (!cfg.arkKey) { log('没填豆包 API Key，关键词不会自动翻译，外语站点会直接用原词搜索', true); return out; }
+    log('正在用豆包把 ' + miss.length + ' 个关键词翻译成各站点语言…');
+    try {
+      var r = await doubao('把下面的电商搜索关键词翻译成指定语言。要求：译成当地买家在 Temu / Amazon 搜索框里真实会输入的简短说法，保留颜色、印花/图案、T 恤、男女含义；不要加品牌、引号、解释；已经是该语言的原样返回。\n' +
+        miss.map(function (p, i) { return i + '. [' + p.lang + '] ' + p.kw; }).join('\n') +
+        '\n只返回 JSON：{"items":[{"i":序号,"t":"译文"}]}');
+      (r.items || []).forEach(function (it) {
+        var p = miss[+it.i], tr = splitKeywords(it.t)[0];
+        if (p && tr) { cache[p.lang + '|' + p.kw] = tr; out[p.lang + '|' + p.kw] = tr; }
+      });
+      GM_setValue('kwTrans', cache);
+    } catch (e) { log('关键词翻译失败，用原词搜索：' + e.message, true); }
+    return out;
+  }
+  async function buildTasks() {
+    var kws = splitKeywords(cfg.myKeywords), on = SITES.filter(function (s) { return cfg.sites[s.id].on; });
+    if (!kws.length || !on.length) return [];
+    var colors = cfg.colorMode === 'rotate' ? ['black', 'white'] : [cfg.colorMode === 'white' ? 'white' : 'black'];
+    var src = {};
+    colors.forEach(function (c) { src[c] = c === 'white' ? splitKeywords(kws.map(toWhite).join('\n')) : kws; });
+    var pairs = [];
+    on.forEach(function (s) { colors.forEach(function (c) { src[c].forEach(function (k) { if (needsTrans(k, s)) pairs.push({ kw: k, lang: s.lang }); }); }); });
+    var tr = await translateMany(pairs), tasks = [];
+    on.forEach(function (s) {
+      colors.forEach(function (c) {
+        var seen = [];
+        src[c].forEach(function (k) {
+          var kk = needsTrans(k, s) ? (tr[s.lang + '|' + k] || k) : k;
+          if (seen.indexOf(kk.toLowerCase()) >= 0) return;
+          seen.push(kk.toLowerCase());
+          tasks.push({ type: 'search', site: s.id, keyword: kk, src: k, color: c });
+        });
+      });
     });
     return tasks;
+  }
+  function noResultsText() {
+    var txt = ((document.body && document.body.innerText) || '').slice(0, 30000);
+    return /没有[“"「].{0,80}[”"」]的结果|没有找到相关|No results for|0 results for|couldn.t find any|did not match any|Keine Ergebnisse|Aucun résultat|Nessun risultato|No se encontraron|No hay resultados|Nenhum resultado|検索結果がありません|一致する商品はありません|ไม่พบสินค้า|Không tìm thấy|Tidak ditemukan/i.test(txt);
+  }
+  // Types into the site's own search box like a person would (some sites only return results this way).
+  async function typeSearch(kw) {
+    var W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    var sel = 'input[type="search"], input[name="search_key"], input[name="q"], input[name="k"], input[name="keyword"], input[name="field-keywords"], input[id*="search" i], input[class*="search" i], input[placeholder]';
+    var inp = Array.prototype.find.call(document.querySelectorAll(sel), function (el) {
+      if (host.contains(el) || el.type === 'hidden' || el.type === 'checkbox') return false;
+      var r = el.getBoundingClientRect();
+      return r.width > 80 && r.height > 15 && r.top < 320;
+    });
+    if (!inp) { log('页面上没找到搜索框', true); return false; }
+    var setter = Object.getOwnPropertyDescriptor((W.HTMLInputElement || HTMLInputElement).prototype, 'value').set;
+    inp.focus();
+    setter.call(inp, ''); inp.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(300);
+    setter.call(inp, kw);
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(800);
+    ['keydown', 'keypress', 'keyup'].forEach(function (type) {
+      inp.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    });
+    await sleep(2500);
+    if (hrefHas(kw) && PLAT.isSearch()) return true;
+    var form = inp.closest('form'), btn = null, box = inp.parentElement;
+    for (var i = 0; i < 4 && box && !btn; i++, box = box.parentElement) btn = box.querySelector('button, [type="submit"], [role="button"], [class*="search-btn" i], [class*="searchBtn" i]');
+    if (btn) btn.click();
+    else if (form) { if (form.requestSubmit) form.requestSubmit(); else form.submit(); }
+    return true;
   }
   // The keyword the user already searched on this page goes first, then the built-in keywords.
   function withUserFirst(tasks) {
@@ -1217,23 +1303,20 @@ const COLLECTOR_BODY = String.raw`
   function pause() { running = false; var j = getJob(); if (j) { j.paused = true; setJob(j); } render(); }
 
   async function genKeywords() {
-    var on = SITES.filter(function (s) { return cfg.sites[s.id].on; });
-    if (!on.length) { showTab('country'); log('请先勾选站点', true); return; }
-    var men = cfg.gender === 'men';
-    log('正在让豆包为 ' + on.length + ' 个站点生成关键词…');
-    var r = await doubao('我做跨境电商，要在这些站点搜索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。请为每个站点生成 4 个当地买家真实会搜的关键词：用该站点当地语言，彼此说法不同，都要表达「黑色 + 印花/图案 + 短袖 T 恤 + ' + (men ? '男' : '女') + '」，不要出现品牌、IP、长袖、卫衣、儿童。站点：' +
-      on.map(function (s) { return s.id + '=' + siteLabel(s) + '（参考：' + s[cfg.gender] + '）'; }).join('；') +
-      '。只返回 JSON：{"sites":{"站点代码":["关键词1","关键词2","关键词3","关键词4"]}}');
-    var map = r.sites || {}, n = 0;
-    on.forEach(function (s) {
-      var list = map[s.id];
-      if (!Array.isArray(list) || !list.length) return;
-      var first = splitKeywords(cfg.sites[s.id].keyword)[0] || s[cfg.gender];
-      cfg.sites[s.id].keyword = splitKeywords([first].concat(list).join('|')).slice(0, 5).join(' | ');
-      n++;
-    });
-    save(); syncSites();
-    log('豆包已为 ' + n + ' 个站点生成关键词，开始采集后每个关键词依次搜索');
+    var men = cfg.gender === 'men', have = splitKeywords(cfg.myKeywords);
+    log('正在让豆包想更多英文关键词…');
+    var r = await doubao('我做跨境电商，要搜索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。我已有这些关键词：' + have.join('；') +
+      '。请再给 5 个美国买家真实会搜的英文关键词，彼此说法不同，都要表达「黑色 + 印花/图案 + 短袖 T 恤 + ' + (men ? '男' : '女') + '」，不要品牌、IP、长袖、卫衣、儿童。只返回 JSON：{"keywords":["..."]}');
+    var list = splitKeywords(have.concat(r.keywords || []).join('\n'));
+    cfg.myKeywords = list.join('\n'); save(); $('myKeywords').value = cfg.myKeywords;
+    log('关键词共 ' + list.length + ' 个，外语站点会自动翻译后搜索');
+  }
+  async function previewKeywords() {
+    var tasks = await buildTasks();
+    if (!tasks.length) { log('请先填写关键词并勾选站点', true); return; }
+    var bySite = {};
+    tasks.forEach(function (t) { (bySite[t.site] = bySite[t.site] || []).push(t.keyword); });
+    Object.keys(bySite).forEach(function (id) { log(siteLabel(siteBy(id)) + '：' + bySite[id].join(' / ')); });
   }
 
   // Stalled page (blank, frozen, endless spinner): reload; the saved job resumes where it left off.
@@ -1258,7 +1341,7 @@ const COLLECTOR_BODY = String.raw`
       log('已发送今日日报');
     }
     if (getJob()) return;
-    String(cfg.schedule || '').split(/[,，\s]+/).map(normTime).filter(Boolean).forEach(function (slot) {
+    String(cfg.schedule || '').split(/[,，\s]+/).map(normTime).filter(Boolean).forEach(async function (slot) {
       var key = d + ' ' + slot, diff = toMin(hm) - toMin(slot);
       if (diff < 0 || diff > 15) return;
       var ran = GM_getValue('schedRan', {});
@@ -1267,8 +1350,9 @@ const COLLECTOR_BODY = String.raw`
       Object.keys(ran).forEach(function (k) { if (k.slice(0, 10) !== d) delete ran[k]; });
       GM_setValue('schedRan', ran);
       if (capReached()) { log('定时 ' + slot + '：今日已达上限，不开工'); return; }
-      var tasks = buildTasks();
-      if (!tasks.length || !preflight()) return;
+      if (!preflight()) return;
+      var tasks = await buildTasks();
+      if (!tasks.length || getJob()) return;
       log('定时开工 ' + slot + '：共 ' + tasks.length + ' 个搜索任务');
       notify('定时采集开始', slot + ' 开始，共 ' + tasks.length + ' 个搜索任务', { sound: false, force: true });
       startJob(tasks);
@@ -1307,9 +1391,11 @@ const COLLECTOR_BODY = String.raw`
 
   var siteRows = Object.keys(PLATFORMS).map(function (p) {
     var rows = SITES.filter(function (s) { return s.p === p; }).map(function (s) {
-      return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input type="checkbox" data-c="' + s.id + '" aria-label="' + siteLabel(s) + '"><span style="width:60px;flex:none">' + s.name + '</span><input data-ck="' + s.id + '" aria-label="' + siteLabel(s) + '关键词" style="' + inputCss + '"></div>';
+      return '<label style="display:flex;gap:5px;align-items:center;width:50%;box-sizing:border-box;margin-bottom:4px;cursor:pointer"><input type="checkbox" data-c="' + s.id + '">' + s.name + ' <span style="font-size:11px;color:' + C.dim + '">' + s.lang + '</span></label>';
     }).join('');
-    return '<details data-plat="' + p + '" style="margin-bottom:6px;border-bottom:1px solid ' + C.line + ';padding-bottom:4px"><summary style="cursor:pointer;padding:3px 0"><strong>' + PNAMES[p] + '</strong> <span data-pc="' + p + '" style="font-size:11px;color:' + C.dim + '"></span></summary><div style="padding-top:4px">' + rows + '</div></details>';
+    return '<details data-plat="' + p + '" style="margin-bottom:6px;border-bottom:1px solid ' + C.line + ';padding-bottom:4px"><summary style="cursor:pointer;padding:3px 0"><strong>' + PNAMES[p] + '</strong> <span data-pc="' + p + '" style="font-size:11px;color:' + C.dim + '"></span></summary>' +
+      '<div style="display:flex;gap:10px;font-size:11px;margin:2px 0 4px"><button data-all="' + p + '" style="' + linkCss + '">全选</button><button data-none="' + p + '" style="' + linkCss + '">全不选</button></div>' +
+      '<div style="display:flex;flex-wrap:wrap">' + rows + '</div></details>';
   }).join('');
 
   var host = document.createElement('div');
@@ -1335,13 +1421,16 @@ const COLLECTOR_BODY = String.raw`
           hint('Etsy / Amazon 卡片不显示销量，用评价数代替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。') +
         '</div>' +
         '<div data-pane="country" style="display:none">' +
-          hint('勾选要采集的平台和国家站点，会按顺序逐个搜索，跨平台也会自动跳转。请先在这个浏览器里手动登录这些网站。关键词可改。') + siteRows +
+          field('我的关键词（每行一个，依次轮询搜索）', '<textarea data-k="myKeywords" rows="4" style="' + inputCss + ';resize:vertical"></textarea>') +
+          check('kwTranslate', '选了其他国家时，自动把关键词翻译成该国语言再搜索（用豆包）') +
+          '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="genKw" style="' + btnCss + '">豆包帮我想更多词</button><button data-k="previewKw" style="' + btnCss + '">预览各站搜索词</button></div>' +
+          hint('翻译结果会缓存，同一个词只翻译一次。下面勾选要采集的站点，不勾就不采；跨平台会自动跳转，请先在这个浏览器里登录这些网站。') +
+          '<div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button data-k="noneAll" style="' + linkCss + ';font-size:11px">取消全部站点</button></div>' +
+          siteRows +
           '<button data-k="recommend" style="' + btnCss + ';width:100%;margin-top:4px">问豆包：黑 T 在哪些平台/国家卖得多</button>' +
-          '<button data-k="genKw" style="' + btnCss + ';width:100%;margin-top:6px">让豆包给已选站点各生成多个关键词（轮换搜索）</button>' +
-          hint('一个站点可以写多个关键词，用「|」隔开，会依次搜索。') +
         '</div>' +
         '<div data-pane="auto" style="display:none">' +
-          field('定时开工（多个用逗号隔开，如 09:00,20:00）', input('schedule', 'placeholder="留空 = 不定时"')) +
+          field('定时开工（多��用逗号隔开，如 09:00,20:00）', input('schedule', 'placeholder="留空 = 不定时"')) +
           row(field('每日最多同步（0 = 不限）', input('dailyCap', 'type="number" min="0"')), field('日报推送时间', input('reportTime', 'placeholder="22:00"'))) +
           row(field('每采几张休息一次', input('restEvery', 'type="number" min="0"')), field('每次休息分钟', input('restMin', 'type="number" min="0"'))) +
           check('autoResume', '遇到验证码 / 要登录 / 国家不对：提醒我，处理好后自动继续') +
@@ -1423,7 +1512,6 @@ const COLLECTOR_BODY = String.raw`
   function syncSites() {
     SITES.forEach(function (s) {
       host.querySelector('[data-c="' + s.id + '"]').checked = cfg.sites[s.id].on;
-      host.querySelector('[data-ck="' + s.id + '"]').value = cfg.sites[s.id].keyword;
     });
     Object.keys(PLATFORMS).forEach(function (p) {
       host.querySelector('[data-plat="' + p + '"]').open = p === PKEY || SITES.some(function (s) { return s.p === p && cfg.sites[s.id].on; });
@@ -1432,9 +1520,23 @@ const COLLECTOR_BODY = String.raw`
   }
   SITES.forEach(function (s) {
     host.querySelector('[data-c="' + s.id + '"]').onchange = function (e) { cfg.sites[s.id].on = e.target.checked; save(); syncCounts(); };
-    host.querySelector('[data-ck="' + s.id + '"]').onchange = function (e) { cfg.sites[s.id].keyword = e.target.value.trim() || s[cfg.gender]; e.target.value = cfg.sites[s.id].keyword; save(); };
   });
+  function setPlatform(p, on) {
+    SITES.forEach(function (s) { if (!p || s.p === p) cfg.sites[s.id].on = on; });
+    save(); syncSites();
+  }
+  Object.keys(PLATFORMS).forEach(function (p) {
+    host.querySelector('[data-all="' + p + '"]').onclick = function () { setPlatform(p, true); };
+    host.querySelector('[data-none="' + p + '"]').onclick = function () { setPlatform(p, false); };
+  });
+  $('noneAll').onclick = function () { setPlatform(null, false); log('已取消全部站点'); };
   syncSites();
+  $('myKeywords').value = cfg.myKeywords;
+  $('myKeywords').onchange = function () {
+    cfg.myKeywords = splitKeywords($('myKeywords').value).join('\n');
+    $('myKeywords').value = cfg.myKeywords; save();
+  };
+  $('previewKw').onclick = function () { previewKeywords().catch(function (e) { log(e.message, true); }); };
 
   ['arkKey', 'arkModel', 'skipWords', 'removeWords', 'handoff', 'schedule', 'reportTime', 'pushType', 'pushKey', 'colorMode'].forEach(function (k) {
     $(k).value = cfg[k];
@@ -1451,7 +1553,7 @@ const COLLECTOR_BODY = String.raw`
     $(k).value = cfg[k];
     $(k).onchange = function () { var v = parseInt($(k).value, 10); cfg[k] = isFinite(v) && v >= 0 ? v : DEFAULTS[k]; $(k).value = cfg[k]; save(); render(); };
   });
-  ['blackOnly', 'pixelCheck', 'enterStore', 'saveOriginal', 'aiCheck', 'aiVision', 'imgDedupe', 'autoResume', 'beep', 'userFirst'].forEach(function (k) {
+  ['blackOnly', 'pixelCheck', 'enterStore', 'saveOriginal', 'aiCheck', 'aiVision', 'imgDedupe', 'autoResume', 'beep', 'userFirst', 'kwTranslate'].forEach(function (k) {
     $(k).checked = !!cfg[k];
     $(k).onchange = function () { cfg[k] = $(k).checked; save(); };
   });
@@ -1459,8 +1561,8 @@ const COLLECTOR_BODY = String.raw`
   $('gender').onchange = function () {
     var prev = cfg.gender;
     cfg.gender = $('gender').value;
-    SITES.forEach(function (s) { if (cfg.sites[s.id].keyword === s[prev]) cfg.sites[s.id].keyword = s[cfg.gender]; });
-    save(); syncSites();
+    if (cfg.myKeywords === SITES[0][prev]) { cfg.myKeywords = SITES[0][cfg.gender]; $('myKeywords').value = cfg.myKeywords; }
+    save();
   };
   $('resetWords').onclick = function () {
     cfg.skipWords = DEFAULT_SKIP.join('，'); cfg.removeWords = DEFAULT_REMOVE.join('，');
@@ -1519,13 +1621,18 @@ const COLLECTOR_BODY = String.raw`
     if (cfg.aiCheck && !cfg.arkKey) { showTab('api'); log('开了豆包审核，请先填写豆包 API Key', true); return false; }
     return true;
   }
-  $('start').onclick = function () {
-    if (getJob()) { log('已有任务，点「暂停/继续」或先「结束任务」'); return; }
+  var starting = false;
+  $('start').onclick = async function () {
+    if (getJob() || starting) { log('已有任务，点「暂停/继续」或先「结束任务」'); return; }
     if (!preflight()) return;
     if (capReached()) { log('今日已达每日上限 ' + cfg.dailyCap + '，到「自动」里调高或改成 0', true); return; }
-    var tasks = withUserFirst(buildTasks());
-    if (!tasks.length) { showTab('country'); log('请至少勾选一个站点', true); return; }
-    startJob(tasks);
+    if (!splitKeywords(cfg.myKeywords).length) { showTab('country'); log('请先在「站点」里填写关键词', true); return; }
+    starting = true;
+    try {
+      var tasks = withUserFirst(await buildTasks());
+      if (!tasks.length) { showTab('country'); log('请至少勾选一个站点', true); return; }
+      startJob(tasks);
+    } finally { starting = false; }
   };
   $('here').onclick = function () {
     if (getJob()) { log('已有任务，请先「结束任务」'); return; }
@@ -1592,7 +1699,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.7.0',
+    '// @version      6.8.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
