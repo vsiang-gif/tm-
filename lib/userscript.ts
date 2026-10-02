@@ -1329,24 +1329,74 @@ const COLLECTOR_BODY = String.raw`
       return r.width > 80 && r.height > 15 && r.top < 320;
     });
     if (!inp) { log('页面上没找到搜索框', true); return false; }
+    // Events must be built with the page's own constructors, or the site's framework ignores them.
+    var Ev = W.Event || Event, KEv = W.KeyboardEvent || KeyboardEvent, IEv = W.InputEvent || Ev;
     var setter = Object.getOwnPropertyDescriptor((W.HTMLInputElement || HTMLInputElement).prototype, 'value').set;
-    inp.focus();
-    setter.call(inp, ''); inp.dispatchEvent(new Event('input', { bubbles: true }));
-    await sleep(300);
-    setter.call(inp, kw);
-    inp.dispatchEvent(new Event('input', { bubbles: true }));
-    inp.dispatchEvent(new Event('change', { bubbles: true }));
-    await sleep(800);
+    var fire = function (el, type, C, init) { try { el.dispatchEvent(new C(type, init)); } catch (e) { el.dispatchEvent(new Ev(type, { bubbles: true })); } };
+    var startHref = location.href;
+    var submitted = function () { return location.href !== startHref || (hrefHas(kw) && PLAT.isSearch()); };
+    var waitNav = async function (ms) { var end = Date.now() + ms; while (Date.now() < end) { if (submitted()) return true; await sleep(250); } return submitted(); };
+
+    inp.scrollIntoView({ block: 'center' });
+    inp.click(); inp.focus();
+    inp.select && inp.select();
+    var typed = false;
+    try { typed = document.execCommand('selectAll', false) && document.execCommand('insertText', false, kw); } catch (e) { typed = false; }
+    if (!typed || inp.value !== kw) {
+      setter.call(inp, '');
+      fire(inp, 'input', IEv, { bubbles: true, inputType: 'deleteContentBackward' });
+      for (var c = 0; c < kw.length; c++) {
+        setter.call(inp, kw.slice(0, c + 1));
+        fire(inp, 'input', IEv, { bubbles: true, data: kw[c], inputType: 'insertText' });
+        await sleep(20 + Math.random() * 40);
+      }
+    }
+    fire(inp, 'change', Ev, { bubbles: true });
+    await sleep(700);
+    if (inp.value !== kw) { setter.call(inp, kw); fire(inp, 'input', IEv, { bubbles: true }); await sleep(300); }
+
+    // 1) press Enter
     ['keydown', 'keypress', 'keyup'].forEach(function (type) {
-      inp.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      fire(inp, type, KEv, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, charCode: type === 'keypress' ? 13 : 0, bubbles: true, cancelable: true, composed: true });
     });
-    await sleep(2500);
-    if (hrefHas(kw) && PLAT.isSearch()) return true;
-    var form = inp.closest('form'), btn = null, box = inp.parentElement;
-    for (var i = 0; i < 4 && box && !btn; i++, box = box.parentElement) btn = box.querySelector('button, [type="submit"], [role="button"], [class*="search-btn" i], [class*="searchBtn" i]');
-    if (btn) btn.click();
-    else if (form) { if (form.requestSubmit) form.requestSubmit(); else form.submit(); }
-    return true;
+    if (await waitNav(3000)) return true;
+
+    // 2) click the magnifier button (skip the clear "x" button, which would wipe the text)
+    if (inp.value !== kw) { setter.call(inp, kw); fire(inp, 'input', IEv, { bubbles: true }); await sleep(300); }
+    var ir = inp.getBoundingClientRect(), best = null, box = inp.parentElement;
+    for (var i = 0; i < 5 && box && !best; i++, box = box.parentElement) {
+      var cands = Array.prototype.filter.call(box.querySelectorAll('button, [type="submit"], [role="button"], [class*="search" i][class*="btn" i], [class*="search" i][class*="icon" i], svg'), function (el) {
+        if (host.contains(el) || el === inp || el.contains(inp)) return false;
+        var s = ((el.getAttribute('aria-label') || '') + ' ' + (el.className && el.className.baseVal != null ? el.className.baseVal : el.className || '') + ' ' + (el.title || '')).toLowerCase();
+        if (/clear|close|delete|清除|删除|remove/.test(s)) return false;
+        var r = el.getBoundingClientRect();
+        return r.width >= 16 && r.height >= 16 && r.width < 160 && Math.abs((r.top + r.height / 2) - (ir.top + ir.height / 2)) < ir.height && r.left > ir.left + ir.width * 0.6;
+      });
+      if (cands.length) best = cands.sort(function (a, b) { return b.getBoundingClientRect().right - a.getBoundingClientRect().right; })[0];
+    }
+    if (best) {
+      var clickEl = best.closest('button, [role="button"], a, div') || best;
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(function (type) {
+        fire(clickEl, type, /pointer/.test(type) ? (W.PointerEvent || W.MouseEvent || Ev) : (W.MouseEvent || Ev), { bubbles: true, cancelable: true, composed: true, view: W, button: 0 });
+      });
+      clickEl.click();
+      if (await waitNav(4000)) return true;
+    }
+
+    // 3) submit the form
+    var form = inp.closest('form');
+    if (form) {
+      try { if (form.requestSubmit) form.requestSubmit(); else form.submit(); } catch (e) {}
+      if (await waitNav(4000)) return true;
+    }
+
+    // 4) last resort: open the site's search URL directly
+    log('搜索框没能提交，改为直接打开搜索网址「' + kw + '」');
+    try {
+      var u = searchUrl(currentSite().id, kw);
+      if (u) { location.href = u; return true; }
+    } catch (e) {}
+    return false;
   }
   // The keyword the user already searched on this page goes first, then the built-in keywords.
   function withUserFirst(tasks) {
@@ -1551,7 +1601,7 @@ const COLLECTOR_BODY = String.raw`
           '</div>' +
           check('kwAutoRand', '每次「开始多站点采集」前自动追加一批新随机词') +
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span data-k="kwHistInfo" style="font-size:11px;opacity:.7"></span><button data-k="clearKwHist" style="' + linkCss + ';font-size:11px">清空生成记录</button></div>' +
-          hint('随机词在本地组合（颜色 + 主题 + 印花 + T 恤 + 男女），不花灵豆也不花豆包费用；所有生成过的词都会记录，词序不同也算重复，永远不会再生成同一个词。') +
+          hint('随机词在本地组合（颜色 + 主题 + 印花 + T 恤 + 男女），不花灵豆也不花豆包费用；所有生成过的词都会记��，词序不同也算重复，永远不会再生成同一个词。') +
           hint('翻译结果会缓存，同一个词只翻译一次。下面勾选要采集的站点，不勾就不采；跨平台会自动跳转，请先在这个浏览器里登录这些网站。') +
           '<div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button data-k="noneAll" style="' + linkCss + ';font-size:11px">取消全部站点</button></div>' +
           siteRows +
@@ -1822,7 +1872,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.9.0 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.9.1 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
