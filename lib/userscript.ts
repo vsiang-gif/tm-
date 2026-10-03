@@ -211,7 +211,7 @@ const COLLECTOR_BODY = String.raw`
   var RETRY_RE = /^(再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
-  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|���ラック|ดำ|đen|hitam|pret[ao]/i;
+  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|�������ラック|ดำ|đen|hitam|pret[ao]/i;
   var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
@@ -1345,8 +1345,8 @@ const COLLECTOR_BODY = String.raw`
     while (job.idx < job.tasks.length) {
       var t = job.tasks[job.idx];
       if (capReached()) { finishJob('今日已同步 ' + dayStats().saved + ' 张，达到每日上限 ' + cfg.dailyCap); return; }
-      if (colorLeft(job, t) <= 0) {
-        log(siteLabel(siteBy(t.site)) + ' ' + colorName(t) + 'T 已采够 ' + (t.color === 'white' ? cfg.whiteCount : cfg.blackCount) + ' 张，跳过「' + taskLabel(t) + '」');
+      if (t.type !== 'store' && colorLeft(job, t) <= 0) {
+        log(siteLabel(siteBy(t.site)) + ' ' + colorName(t) + 'T 已采够「T 恤颜色 → 每站' + (t.color === 'white' ? '白' : '黑') + ' T 采集」设定的 ' + (t.color === 'white' ? cfg.whiteCount : cfg.blackCount) + ' 张（填 0 = 不限），跳过「' + taskLabel(t) + '」');
         job.idx++; setJob(job); continue;
       }
       // Temu keyword searches start from the site's home page search box, never from inside a store.
@@ -1813,7 +1813,7 @@ const COLLECTOR_BODY = String.raw`
           check('blackOnly', '只要指定颜色款（按下面的颜色模式过滤）') +
           field('颜色模式', '<select data-k="colorMode" style="' + inputCss + '"><option value="black">只采黑 T</option><option value="white">只采纯白 T</option><option value="rotate">轮换：先黑 T 再白 T</option></select>') +
           row(field('每站黑 T 采集（张）', input('blackCount', 'type="number" min="0"')), field('每站白 T 采集（张）', input('whiteCount', 'type="number" min="0"'))) +
-          hint('轮换模式：每个站点先用黑 T 关键词采够设定张数，再自动换成白 T 关键词（自动把 black/schwarz/noir/黑 等换成 white/weiß/blanc/白）。0 = 不限。') +
+          hint('轮换模式：���个站点先用黑 T 关键词采够设定张数，再自动换成白 T 关键词（自动把 black/schwarz/noir/黑 等换成 white/weiß/blanc/白）。0 = 不限。') +
           hint('Etsy / Amazon 卡片不显示销量，用评价数代替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。') +
         '</div>' +
         '<div data-pane="country" style="display:none">' +
@@ -2034,7 +2034,7 @@ const COLLECTOR_BODY = String.raw`
   $('testPush').onclick = function () {
     beep();
     notify('灵图采集测试提醒', '收到这条说明提醒设置正确。\n' + reportText(today()), { sound: false, force: true }).then(function (ok) {
-      log(cfg.pushType === 'none' ? '已播放提示音（没开微信推送）' : ok ? '测试推送已发送，请看微信' : '微��推送失败，检查 Key', !ok && cfg.pushType !== 'none');
+      log(cfg.pushType === 'none' ? '已播放提示音（没开微信推送）' : ok ? '测试��送已发送，请看微信' : '微��推送失败，检查 Key', !ok && cfg.pushType !== 'none');
     });
   };
   $('report').onclick = exportReport;
@@ -2118,7 +2118,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.17.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.17.1' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2140,7 +2140,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.17.0',
+    '// @version      6.17.1',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
