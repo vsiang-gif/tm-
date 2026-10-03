@@ -230,7 +230,7 @@ const COLLECTOR_BODY = String.raw`
     kwRandCount: 10, kwRandColor: 'both', kwAutoRand: false
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
-  if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
+  if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel) || /seedance|seedream/i.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
   if ([6, 7, 8, 9].indexOf(cfg.v) < 0) { cfg.v = 6; cfg.aiCheck = true; cfg.saveOriginal = false; cfg.handoff = 'alt1'; }
   if (cfg.v === 6) { cfg.v = 7; if (cfg.minSales === 100) cfg.minSales = DEFAULTS.minSales; }
   if (cfg.v === 7) { cfg.v = 8; cfg.enterStore = false; }
@@ -620,6 +620,11 @@ const COLLECTOR_BODY = String.raw`
 
   async function doubao(content) {
     if (!cfg.arkKey) throw new Error('请先在「豆包/同步」里填写豆包 API Key');
+    if (/seedance|seedream/i.test(cfg.arkModel || '')) {
+      cfg.arkModel = DEFAULTS.arkModel;
+      GM_setValue('cfg', cfg);
+      log('Seedance/Seedream 是视频/画图模型，不能做审核和翻译，已自动改回 ' + DEFAULTS.arkModel);
+    }
     var r = await gmRequest({
       method: 'POST', url: ARK_URL,
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + cfg.arkKey },
@@ -1419,7 +1424,7 @@ const COLLECTOR_BODY = String.raw`
   async function genKeywords() {
     var men = cfg.gender === 'men', have = splitKeywords(cfg.myKeywords);
     log('正在让豆包想更多英文关键词…');
-    var r = await doubao('我做跨境电商，要搜索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。我已有这些关键词：' + have.join('；') +
+    var r = await doubao('我做跨境电商，要��索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。我已有这些关键词：' + have.join('；') +
       '。请再给 5 个美国买家真实会搜的英文关键词，彼此说法不同，都要表达「黑色 + 印花/图案 + 短袖 T 恤 + ' + (men ? '男' : '女') + '」，不要品牌、IP、长袖、卫衣、儿童。只返回 JSON：{"keywords":["..."]}');
     var list = splitKeywords(have.concat(r.keywords || []).join('\n'));
     cfg.myKeywords = list.join('\n'); save(); $('myKeywords').value = cfg.myKeywords;
@@ -1592,7 +1597,7 @@ const COLLECTOR_BODY = String.raw`
         '</div>' +
         '<div data-pane="country" style="display:none">' +
           field('我的关键词（每行一个，依次轮询搜索）', '<textarea data-k="myKeywords" rows="4" style="' + inputCss + ';resize:vertical"></textarea>') +
-          check('kwTranslate', '选了其他国家时，自动把关键词翻译成该国语言再搜索（用豆包）') +
+          check('kwTranslate', '选了其他国家时，自动把关键词翻译成该国语言再��索（用豆包）') +
           '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="genKw" style="' + btnCss + '">豆包帮我想更多词</button><button data-k="previewKw" style="' + btnCss + '">预览各站搜索词</button></div>' +
           '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
             '<select data-k="kwRandColor" style="' + inputCss + ';flex:1"><option value="both">黑白各半</option><option value="black">只要黑 T</option><option value="white">只要白 T</option></select>' +
@@ -1630,6 +1635,7 @@ const COLLECTOR_BODY = String.raw`
           '<div style="margin-bottom:6px"><strong>豆包审核</strong></div>' +
           field('豆包 API Key（火山方舟）', input('arkKey', 'type="password"')) +
           field('模型 / 接入点 ID', input('arkModel')) +
+          hint('填文字/看图模型，如 doubao-seed-2-0-pro、doubao-seed-2-0-lite。Seedance 2.0（视频）和 Seedream（画图）不能用于审核和翻译，填了会自动改回。') +
           check('aiCheck', '用豆包审核每个商品（违规 / IP 侵权）') +
           check('aiVision', '审核时看图（双面 / 满印 / 颜色）') +
           '<div style="border-top:1px solid ' + C.line + ';margin:8px 0;padding-top:8px"><strong>采集同步（灵图插件 Alt+1）</strong></div>' +
@@ -1894,7 +1900,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.10.1',
+    '// @version      6.10.2',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
