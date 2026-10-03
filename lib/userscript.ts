@@ -1105,33 +1105,23 @@ const COLLECTOR_BODY = String.raw`
         return /此商品已售罄|商品已下架|已售罄|This item is sold out|Sold out|no longer available|Ausverkauft|Épuisé|Esaurito|Agotado|Esgotado|売り切れ/i.test(txt);
       };
       await waitFor(function () { return findStoreLink() || soldOut(); }, 15000);
-      if (soldOut()) { log('商品 ' + t.goodsId + ' 已售罄/下架，跳过进店，继续下一个'); return; }
+      if (soldOut()) { log('商品 ' + t.goodsId + ' 已售罄/下架，跳过进店'); ensureReturn(t, job); return; }
       var link = findStoreLink();
-      if (!link) { log('商品 ' + t.goodsId + ' 没找到店铺入口', true); return; }
+      if (!link) { log('商品 ' + t.goodsId + ' 没找到店铺入口', true); ensureReturn(t, job); return; }
       var sk = PKEY + ':' + link.storeId;
-      if (job.visitedStores.indexOf(sk) >= 0) { log('店铺 ' + link.storeId + ' 已采过，跳过'); return; }
+      if (job.visitedStores.indexOf(sk) >= 0) { log('店铺 ' + link.storeId + ' 已采过，跳过'); ensureReturn(t, job); return; }
       job.visitedStores.push(sk);
-      job.tasks.splice(job.idx + 1, 0, storeTask(t.site, link.storeId, link.url, t.keyword, t.color));
+      var nst = storeTask(t.site, link.storeId, link.url, t.keyword, t.color);
+      nst.back = t.back;
+      job.tasks.splice(job.idx + 1, 0, nst);
       return;
     }
-    // Inside a store, only the store's own search results for the keyword are collected — never the store's other products.
-    if (t.type === 'store' && t.keyword) {
-      await sleep(2500);
-      if (!onStoreKeywordResults(t)) {
-        if (!t.storeTyped) {
-          t.storeTyped = true; setJob(job);
-          log('店铺 ' + t.storeId + ' 还没在搜「' + t.keyword + '」，在店内搜索框输入并搜索');
-          await typeSearch(t.keyword, { store: true });
-          await waitFor(function () { return onStoreKeywordResults(t); }, 8000);
-        }
-        if (!onStoreKeywordResults(t)) {
-          log('店铺 ' + t.storeId + ' 无法在店内搜索「' + t.keyword + '」，为避免采到无关商品，跳过这家店');
-          return;
-        }
-      }
-      log('已在店铺 ' + t.storeId + ' 内搜索「' + t.keyword + '」，只采搜索结果');
+    if (t.type === 'store') {
+      await runStoreTask(t, job);
+      ensureReturn(t, job);
+      return;
     }
-    var optional = PLAT.metric === 'optional' || t.type === 'store';
+    var optional = PLAT.metric === 'optional';
     var hasGoods = function () { return extract(optional).length > 0; };
     var found = await waitFor(hasGoods, 15000);
     // A URL-opened search can come back empty even though typing the same words into the site's box works.
@@ -1139,11 +1129,6 @@ const COLLECTOR_BODY = String.raw`
       t.typed = true; setJob(job);
       log('网址搜索没出商品，改用页面搜索框重新搜「' + t.keyword + '」');
       if (await typeSearch(t.keyword)) found = await waitFor(hasGoods, 20000);
-    }
-    // In-store keyword search with nothing matching: skip the store instead of syncing unrelated designs.
-    if (!found && t.type === 'store' && t.keyword && (noResultsText() || hrefHas(t.keyword))) {
-      log('店铺 ' + t.storeId + ' 里搜「' + t.keyword + '」没有商品，跳过这家店，回到搜索页继续');
-      return;
     }
     if (!found && t.type === 'search' && noResultsText()) { log('「' + t.keyword + '」在' + siteLabel(siteBy(t.site)) + '确实没有结果，换下一个关键��', true); return; }
     if (found) {
@@ -1177,6 +1162,14 @@ const COLLECTOR_BODY = String.raw`
       return;
     }
     var added = 0;
+    // Every store visit remembers the search page it came from, so leaving the store always goes back there.
+    var back = {
+      id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      site: t.site, keyword: t.keyword, user: t.user, color: t.color,
+      carry: ctx.saved, done: ctx.saved >= ctx.target,
+      storesEntered: (t.storesEntered || 0) + picks.length,
+      returnUrl: isMainSearch() ? location.href : (t.returnUrl || '')
+    };
     picks.forEach(function (x) {
       job.visitedGoods.push(x.key);
       var task;
@@ -1186,8 +1179,9 @@ const COLLECTOR_BODY = String.raw`
         job.visitedStores.push(key);
         task = storeTask(t.site, st.storeId, st.url, t.keyword, t.color);
       } else {
-        task = { type: 'goods', site: t.site, goodsId: x.goodsId, url: x.productUrl, color: t.color };
+        task = { type: 'goods', site: t.site, goodsId: x.goodsId, url: x.productUrl, color: t.color, keyword: t.keyword };
       }
+      task.back = back;
       log('高销量 ' + x.goodsId + '（' + x.salesText + '）≥ 门槛 ' + cfg.storeMinSales + ' → 进店采集');
       job.tasks.splice(job.idx + 1 + added, 0, task);
       added++;
@@ -1202,6 +1196,60 @@ const COLLECTOR_BODY = String.raw`
       });
     }
     if (added) log('将进入 ' + added + ' 个高销量店铺，采完自动退出' + (ctx.storeBreak ? '，回到「' + t.keyword + '」继续采集' : '继续下一个搜索'));
+  }
+  // Inside a store only the store's own search results for the keyword are collected.
+  // No matching products (or no way to search the store) means: close the store and go back to the search page.
+  async function runStoreTask(t, job) {
+    if (t.keyword) {
+      await sleep(2500);
+      if (!onStoreKeywordResults(t)) {
+        if (!t.storeTyped) {
+          t.storeTyped = true; setJob(job);
+          log('店铺 ' + t.storeId + ' 还没在搜「' + t.keyword + '」，在店内搜索框输入并搜索');
+          await typeSearch(t.keyword, { store: true });
+          await waitFor(function () { return onStoreKeywordResults(t); }, 8000);
+        }
+        if (!onStoreKeywordResults(t)) {
+          log('店铺 ' + t.storeId + ' 无法在店内搜索「' + t.keyword + '」，关闭店铺，回到搜索页继续');
+          return;
+        }
+      }
+      log('已在店铺 ' + t.storeId + ' 内搜索「' + t.keyword + '」，只采搜索结果');
+    }
+    var matching = function () {
+      return extract(true).filter(function (x) { return !t.keyword || titleMatchesKeyword(x.title, t.keyword); }).length > 0;
+    };
+    var found = await waitFor(function () { return noResultsText() || matching(); }, 12000) && !noResultsText() && matching();
+    if (!found) {
+      log('店铺 ' + t.storeId + ' 里没有「' + t.keyword + '」的商品，关闭店铺，回到搜索页继续');
+      return;
+    }
+    var site = siteBy(t.site);
+    var ctx = {
+      country: site, task: t, job: job, optional: true, color: t.color,
+      saved: 0, backlog: [], seen: new Set(), candidates: [],
+      target: Math.min(cfg.storeTarget, colorLeft(job, t)),
+      source: '店铺' + t.storeId,
+      label: '店铺' + t.storeId + (t.keyword ? '「' + t.keyword + '」' : '')
+    };
+    await collectPage(ctx);
+    if (running) log('店铺 ' + t.storeId + ' 采完（同步 ' + ctx.saved + ' 张），退出店铺');
+  }
+  // After a store/product detour, make sure the next stop is the search page it came from.
+  function ensureReturn(t, job) {
+    var b = t.back;
+    if (!running || !b) return;
+    var j = job.idx + 1;
+    while (j < job.tasks.length && job.tasks[j].back && job.tasks[j].back.id === b.id && job.tasks[j].type !== 'search') j++;
+    if (j > job.idx + 1) { log('下一家高销量店铺排队中，处理完再回到「' + b.keyword + '」搜索页'); return; }
+    var nx = job.tasks[j];
+    if (nx && nx.type === 'search' && nx.site === b.site && nx.keyword === b.keyword) return;
+    if (b.done) return;
+    job.tasks.splice(j, 0, {
+      type: 'search', site: b.site, keyword: b.keyword, user: b.user, color: b.color,
+      carry: b.carry, storesEntered: b.storesEntered, resumed: true, returnUrl: b.returnUrl
+    });
+    setJob(job);
   }
   // Store visits search the store with the same keyword that found the hit product.
   function storeTask(siteId, storeId, plainUrl, keyword, color) {
@@ -1747,7 +1795,7 @@ const COLLECTOR_BODY = String.raw`
           hint('不再使用灵图 API。如果 Alt+1 没反应，改选「自动点按钮」。') +
           check('saveOriginal', '同时把原图和标题保存到电脑') +
           '<div style="border-top:1px solid ' + C.line + ';margin:8px 0;padding-top:8px"><strong>去重（防止重复花灵豆）</strong></div>' +
-          hint('同一个商品 ID 永远只同步一次；灵图按钮显示「再次采集」的也会跳过；所有标签页共用一个去重库。') +
+          hint('同一个商品 ID 永远只同步一次；灵图按钮��示「再次采集」的也会跳过；所有标签页共用一个去重库。') +
           check('imgDedupe', '图案相似去重：不同卖家的同款图也不重复采') +
           '<div data-k="dbInfo" style="font-size:12px;color:' + C.dim + ';margin-bottom:6px"></div>' +
           '<div style="display:flex;gap:6px;margin-bottom:6px"><button data-k="exportDb" style="' + btnCss + '">备份去重库</button><button data-k="importDb" style="' + btnCss + '">导入去重库</button></div>' +
@@ -1998,7 +2046,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.13.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.14.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2020,7 +2068,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.13.0',
+    '// @version      6.14.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
