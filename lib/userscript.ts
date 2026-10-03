@@ -321,6 +321,22 @@ const COLLECTOR_BODY = String.raw`
   function hrefHas(k) {
     try { return decodeURIComponent(location.href.replace(/\+/g, ' ')).toLowerCase().indexOf(String(k).toLowerCase()) >= 0; } catch (e) { return false; }
   }
+  // True only on the store's own search results for this keyword (not the store home, not the site-wide search).
+  function onStoreKeywordResults(t) {
+    if (!hrefHas(t.keyword)) return false;
+    var sid = PLAT.store(location.href);
+    return sid ? sid === t.storeId : !isMainSearch() && !PLAT.goods(location.href);
+  }
+  var KW_STOP = /^(t|tee|tees|shirt|shirts|tshirt|tshirts|men|mens|man|male|women|womens|woman|female|for|the|and|with|of|a|an|guys|guy|unisex|graphic|graphics|print|printed|prints|casual|crew|neck|top|tops|black|white|jet|all|plain|summer|short|sleeve|sleeves|cotton|oversized|loose|fit|new|cool|funny)$/i;
+  // Latin-script titles must share at least one meaningful word with the keyword; CJK titles can't be compared, so they pass.
+  function titleMatchesKeyword(title, kw) {
+    title = String(title || '');
+    if (/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(title)) return true;
+    var core = String(kw || '').toLowerCase().split(/[^a-z0-9\u00c0-\u024f]+/).filter(function (w) { return w.length >= 3 && !KW_STOP.test(w); });
+    if (!core.length) return true;
+    var low = title.toLowerCase();
+    return core.some(function (w) { return low.indexOf(w.length > 4 ? w.slice(0, w.length - 1) : w) >= 0; });
+  }
 
   // ---------- keyword rules ----------
   function esc(s) { return s.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&'); }
@@ -945,11 +961,15 @@ const COLLECTOR_BODY = String.raw`
       if (!x.noMetric && x.salesCount < cfg.minSales) {
         stats.skipped++;
         ctx.lowSales = (ctx.lowSales || 0) + 1;
-        markCard(x.el, 'warn', '不采：' + x.salesText + '，低于最低销量 ' + cfg.minSales);
+        markCard(x.el, 'warn', '不采：' + x.salesText + '��低于最低销量 ' + cfg.minSales);
         return;
       }
       var hit = findHit(x.title, skipList);
       if (hit) { stats.skipped++; log('跳过 ' + x.goodsId + '：标题含「' + hit + '」'); markCard(x.el, 'bad', '不采：标题含「' + hit + '」'); return; }
+      var st = ctx.task;
+      if (st && st.type === 'store' && st.keyword && !titleMatchesKeyword(x.title, st.keyword)) {
+        stats.skipped++; markCard(x.el, 'warn', '不采：与「' + st.keyword.slice(0, 20) + '」无关'); return;
+      }
       var cre = colorOf(ctx) === 'white' ? WHITE_RE : BLACK_RE;
       if (cfg.blackOnly && !cfg.pixelCheck && !cre.test(x.title)) return;
       x.ctx = ctx;
@@ -1094,6 +1114,23 @@ const COLLECTOR_BODY = String.raw`
       job.tasks.splice(job.idx + 1, 0, storeTask(t.site, link.storeId, link.url, t.keyword, t.color));
       return;
     }
+    // Inside a store, only the store's own search results for the keyword are collected — never the store's other products.
+    if (t.type === 'store' && t.keyword) {
+      await sleep(2500);
+      if (!onStoreKeywordResults(t)) {
+        if (!t.storeTyped) {
+          t.storeTyped = true; setJob(job);
+          log('店铺 ' + t.storeId + ' 还没在搜「' + t.keyword + '」，在店内搜索框输入并搜索');
+          await typeSearch(t.keyword, { store: true });
+          await waitFor(function () { return onStoreKeywordResults(t); }, 8000);
+        }
+        if (!onStoreKeywordResults(t)) {
+          log('店铺 ' + t.storeId + ' 无法在店内搜索「' + t.keyword + '」，为避免采到无关商品，跳过这家店');
+          return;
+        }
+      }
+      log('已在店铺 ' + t.storeId + ' 内搜索「' + t.keyword + '」，只采搜索结果');
+    }
     var optional = PLAT.metric === 'optional' || t.type === 'store';
     var hasGoods = function () { return extract(optional).length > 0; };
     var found = await waitFor(hasGoods, 15000);
@@ -1170,7 +1207,7 @@ const COLLECTOR_BODY = String.raw`
   function storeTask(siteId, storeId, plainUrl, keyword, color) {
     var url = plainUrl;
     if (keyword && PLAT.storeSearch) url = PLAT.storeSearch(siteBy(siteId), storeId, keyword);
-    return { type: 'store', site: siteId, storeId: storeId, url: url, plainUrl: plainUrl, keyword: url !== plainUrl ? keyword : '', color: color };
+    return { type: 'store', site: siteId, storeId: storeId, url: url, plainUrl: plainUrl, keyword: keyword || '', color: color };
   }
   function storePicks(ctx) {
     var t = ctx.task, job = ctx.job;
@@ -1378,21 +1415,25 @@ const COLLECTOR_BODY = String.raw`
     return /没有[“"「].{0,80}[”"」]的结果|没有找到相关|No results for|0 results for|couldn.t find any|did not match any|Keine Ergebnisse|Aucun résultat|Nessun risultato|No se encontraron|No hay resultados|Nenhum resultado|検索結果がありません|一致する商品はありません|ไม่พบสินค้า|Không tìm thấy|Tidak ditemukan/i.test(txt);
   }
   // Types into the site's own search box like a person would (some sites only return results this way).
-  async function typeSearch(kw) {
+  async function typeSearch(kw, opts) {
     var W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-    // Never type into a store/product page's box: that searches inside the store. Open the site-wide search instead.
-    if (!isMainSearch() && !isHomePage()) {
+    var inStore = !!(opts && opts.store);
+    // Site-wide searches never type into a store/product page's box (that would search inside the store).
+    if (!inStore && !isMainSearch() && !isHomePage()) {
       log('当前在店铺/商品页，不在店内搜索，先回首页再搜「' + kw + '」');
       location.href = homeUrl(currentSite().id);
       return true;
     }
-    var sel = 'input[type="search"], input[name="search_key"], input[name="q"], input[name="k"], input[name="keyword"], input[name="field-keywords"], input[id*="search" i], input[class*="search" i], input[placeholder]';
-    var inp = Array.prototype.find.call(document.querySelectorAll(sel), function (el) {
+    var STORE_BOX = /本店|店内|店铺|this store|in store|this shop|in shop|im shop|dans la boutique|nel negozio|en la tienda|search .*shop|search all/i;
+    var sel = 'input[type="search"], input[name="search_key"], input[name="q"], input[name="k"], input[name="keyword"], input[name="search_query"], input[name="field-keywords"], input[id*="search" i], input[class*="search" i], input[placeholder]';
+    var boxes = Array.prototype.filter.call(document.querySelectorAll(sel), function (el) {
       if (host.contains(el) || el.type === 'hidden' || el.type === 'checkbox') return false;
-      if (/本店|店内|店铺|this store|in store|this shop|in shop|im shop|dans la boutique|nel negozio|en la tienda/i.test((el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || ''))) return false;
       var r = el.getBoundingClientRect();
-      return r.width > 80 && r.height > 15 && r.top < 320;
+      return r.width > 80 && r.height > 15 && (inStore ? r.top < W.innerHeight : r.top < 320);
     });
+    var isStoreBox = function (el) { return STORE_BOX.test((el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.className || '')); };
+    var inp = inStore ? (boxes.find(isStoreBox) || null) : boxes.find(function (el) { return !isStoreBox(el); });
+    if (!inp && inStore) { log('店铺页没找到店内搜索框', true); return false; }
     if (!inp) { log('页面上没找到搜索框', true); return false; }
     // Events must be built with the page's own constructors, or the site's framework ignores them.
     var Ev = W.Event || Event, KEv = W.KeyboardEvent || KeyboardEvent, IEv = W.InputEvent || Ev;
@@ -1602,7 +1643,7 @@ const COLLECTOR_BODY = String.raw`
     SITES.forEach(function (s) { cfg.sites[s.id].on = ids.indexOf(s.id) >= 0; });
     if (!ids.some(function (id) { return cfg.sites[id]; })) cfg.sites['temu-us'].on = true;
     save(); syncSites();
-    log('豆包推荐：' + ids.filter(function (id) { return cfg.sites[id]; }).map(function (id) { return siteLabel(siteBy(id)); }).join('、') + (r.reason ? '。' + r.reason : ''));
+    log('��包推荐：' + ids.filter(function (id) { return cfg.sites[id]; }).map(function (id) { return siteLabel(siteBy(id)); }).join('、') + (r.reason ? '。' + r.reason : ''));
   }
   function exportCsv() {
     var cols = ['status', 'reason', 'country', 'source', 'goodsId', 'title', 'cleanTitle', 'sales', 'salesCount', 'productUrl', 'imageUrl', 'files', 'time'];
@@ -1957,7 +1998,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.12.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.13.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1979,7 +2020,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.12.0',
+    '// @version      6.13.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
