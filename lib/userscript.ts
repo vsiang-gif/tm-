@@ -211,7 +211,7 @@ const COLLECTOR_BODY = String.raw`
   var RETRY_RE = /^(再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
-  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|�������ラック|ดำ|đen|hitam|pret[ao]/i;
+  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|���������ラック|ดำ|đen|hitam|pret[ao]/i;
   var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
@@ -367,7 +367,7 @@ const COLLECTOR_BODY = String.raw`
   }
   function cleanTitle(title) {
     var t = String(title || '');
-    t = t.replace(/秋冬|春秋|秋季|冬季|秋��|冬款/g, '四季').replace(/(四季)+/g, '四季');
+    t = t.replace(/秋冬|春秋|���季|冬季|秋��|冬款/g, '四季').replace(/(四季)+/g, '四季');
     t = t.replace(/\b(autumn\s*(and|&|\/)\s*winter|fall\s*(and|&|\/)\s*winter|autumn|winter)\b/gi, 'All Season').replace(/(All Season\s*)+/g, 'All Season ');
     t = stripWords(t, removeList);
     t = stripWords(t, cfg.gender === 'men' ? femaleList : maleList);
@@ -1058,6 +1058,27 @@ const COLLECTOR_BODY = String.raw`
     return best;
   }
   function productCount() { return document.querySelectorAll('a[href]').length + document.querySelectorAll('img').length; }
+  var retryGaveUp = false;
+  // Returns true when the page is being reloaded (caller must stop), false when this listing should just end.
+  async function handleRetryGiveUp(ctx) {
+    if (!retryGaveUp) return false;
+    retryGaveUp = false;
+    var t = ctx.task;
+    if (!ctx.job || !t || (t.type !== 'search' && t.type !== 'store')) return false;
+    t.reloads = (t.reloads || 0) + 1;
+    if (t.reloads > 3) { log('「' + (t.keyword || ctx.label) + '」已刷新 3 次仍加载失败，换下一个任务'); return false; }
+    t.carry = ctx.saved;
+    if (t.type === 'search') t.storeCands = keepStoreCands(ctx.candidates);
+    setJob(ctx.job);
+    while (pending()) await sleep(800);
+    var wait = 20000 + Math.random() * 25000;
+    log('第 ' + t.reloads + ' 次自动刷新页面（' + Math.round(wait / 1000) + ' 秒后），刷新后从头扫描，已采的自动跳过');
+    await sleep(wait);
+    if (!running) return true;
+    location.reload();
+    await sleep(60000);
+    return true;
+  }
   async function clickMore() {
     var hit = findMore();
     if (!hit) return false;
@@ -1068,26 +1089,25 @@ const COLLECTOR_BODY = String.raw`
       var label = (hit.innerText || hit.textContent || '').replace(/\s+/g, ' ').trim();
       var isRetry = RETRY_RE.test(label);
       // Temu shows「再试一次」when a batch fails to load: keep clicking it (up to 8 times, backing off) instead of treating it as the end of the list.
+      // Temu ignores script clicks (isTrusted=false) on this button, so endless clicking never helps:
+      // try twice, give a person 45 s to click, then let collectPage reload the page (a real navigation works).
       if (isRetry) {
-        if (retryClicks >= 8) break;
+        if (retryClicks >= 2) {
+          notify('「再试一次」加载失败', '脚本点击没反应。45 秒内你手动点一下即可；不点的话脚本会自动刷新页面接着采（已采的不会重复）。');
+          log('「再试一次」脚本点击无效，45 秒内可手动点一下；否则自动刷新页面继续（已采过的会跳过，不重复花灵豆）');
+          if (await waitFor(function () { return productCount() > before; }, 45000)) { await sleep(1200); return true; }
+          retryGaveUp = true;
+          return false;
+        }
         retryClicks++;
-        // Repeated failures are usually rate limiting: cool down longer and browse a little like a person before retrying.
-        var cool = retryClicks <= 2 ? 2500 + Math.random() * 2000 : 8000 + retryClicks * 4000 + Math.random() * 6000;
+        var cool = retryClicks === 1 ? 2500 + Math.random() * 2000 : 12000 + Math.random() * 8000;
         log('出现「' + label + '」，等 ' + Math.round(cool / 1000) + ' 秒后第 ' + retryClicks + ' 次模拟人工点击');
         await sleep(cool);
-        if (retryClicks >= 3) {
+        if (retryClicks >= 2) {
           try { scrollBy({ top: -(300 + Math.random() * 500), behavior: 'smooth' }); } catch (e) {}
           await sleep(1200 + Math.random() * 1500);
           try { scrollBy({ top: 200 + Math.random() * 300, behavior: 'smooth' }); } catch (e) {}
           await sleep(800 + Math.random() * 1000);
-        }
-        if (retryClicks === 5) {
-          notify('需要人工点一下「再试一次」', '脚本连续 4 次点击都没加载出来，请在 Temu 页面上手动点一次「再试一次」，加载出来后脚本会自动接着采。');
-          log('已连续失败 4 次，请手动点一下「再试一次」，脚本等你 90 秒');
-          if (await waitFor(function () { return productCount() > before; }, 90000)) { await sleep(1200); return true; }
-          hit = findMore();
-          if (!hit) return productCount() > before;
-          btn = hit.closest('button, [role="button"], a') || hit;
         }
       }
       var viaReact = await humanClick(btn);
@@ -1116,6 +1136,7 @@ const COLLECTOR_BODY = String.raw`
       if (idle >= 6) {
         if (pending() && !resting) { await sleep(800); continue; }
         if (await clickMore()) { idle = 0; continue; }
+        if (retryGaveUp) { if (await handleRetryGiveUp(ctx)) return; break; }
         // Paginated sites: go to the next page. Full reloads resume from t.page / t.carry; SPA pages just keep scanning.
         if ((t.page || 0) < cfg.maxPages - 1 && clickNext()) {
           t.page = (t.page || 0) + 1; t.carry = ctx.saved;
@@ -1136,6 +1157,7 @@ const COLLECTOR_BODY = String.raw`
       // While the sync worker rests, nothing else scrolls the page, so loading the next batch is safe.
       if (pending() && !resting) { await sleep(800); continue; }
       if (findMore() && await clickMore()) { idle = 0; lastProgress = Date.now(); continue; }
+      if (retryGaveUp) { if (await handleRetryGiveUp(ctx)) return; break; }
       idle++;
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
       await sleep(1800 + Math.random() * 1500);
@@ -1540,7 +1562,7 @@ const COLLECTOR_BODY = String.raw`
     var inStore = !!(opts && opts.store);
     // Site-wide searches never type into a store/product page's box (that would search inside the store).
     if (!inStore && !isMainSearch() && !isHomePage()) {
-      log('当前在店铺/商品页，不在店内搜索，先回首页再搜「' + kw + '」');
+      log('当前在店��/商品页，不在店内搜索，先回首页再搜「' + kw + '」');
       location.href = homeUrl(currentSite().id);
       return true;
     }
@@ -2118,7 +2140,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.17.1' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.18.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2140,7 +2162,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.17.1',
+    '// @version      6.18.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
