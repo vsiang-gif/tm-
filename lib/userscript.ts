@@ -225,7 +225,7 @@ const COLLECTOR_BODY = String.raw`
     sites: {}, v: 6,
     imgDedupe: true, schedule: '', dailyCap: 0, restEvery: 30, restMin: 3, autoResume: true,
     pushType: 'none', pushKey: '', beep: true, reportTime: '22:00',
-    storeMinSales: 500, userFirst: true, colorMode: 'black', blackCount: 30, whiteCount: 30, lightMin: 35,
+    storeMinSales: 500, userFirst: false, colorMode: 'black', blackCount: 30, whiteCount: 30, lightMin: 35,
     myKeywords: '', kwTranslate: true,
     kwRandCount: 10, kwRandColor: 'both', kwAutoRand: false
   };
@@ -844,7 +844,7 @@ const COLLECTOR_BODY = String.raw`
     pushRecord(recOf(item, '跳过', reason));
     stats.skipped++;
     bump('skipped', null, reason);
-    log('跳过 ' + item.goodsId + '：' + reason);
+    log('跳过 ' + item.goodsId + '��' + reason);
     markCard(liveCard(item), 'bad', '不采：' + reason.slice(0, 40));
   }
   function markDup(item, reason) {
@@ -1099,7 +1099,7 @@ const COLLECTOR_BODY = String.raw`
       log('网址搜索没出商品，改用页面搜索框重新搜「' + t.keyword + '」');
       if (await typeSearch(t.keyword)) found = await waitFor(hasGoods, 20000);
     }
-    if (!found && t.type === 'search' && noResultsText()) { log('「' + t.keyword + '」在' + siteLabel(siteBy(t.site)) + '确实没有结果，换下一个关键词', true); return; }
+    if (!found && t.type === 'search' && noResultsText()) { log('「' + t.keyword + '」在' + siteLabel(siteBy(t.site)) + '确实没有结果，换下一个关键��', true); return; }
     if (found) {
       // keep going
     } else if (cfg.autoResume) {
@@ -1456,8 +1456,8 @@ const COLLECTOR_BODY = String.raw`
     var color = WHITE_RE.test(kw) ? 'white' : BLACK_RE.test(kw) ? 'black' : (cfg.colorMode === 'white' ? 'white' : 'black');
     var low = kw.toLowerCase();
     tasks = tasks.filter(function (t) { return !(t.site === sid && String(t.keyword).toLowerCase() === low); });
-    tasks.unshift({ type: 'search', site: sid, keyword: kw, color: color, user: true, navigated: true });
-    log('先采你当前搜的「' + kw + '」，采完再用内置关键词');
+    tasks.unshift({ type: 'search', site: sid, keyword: kw, color: color, user: true, navigated: false });
+    log('先重新搜索你当前的「' + kw + '」，搜出结果后再采集，采完再用内置关键词');
     return tasks;
   }
   function startJob(tasks) {
@@ -1630,7 +1630,7 @@ const COLLECTOR_BODY = String.raw`
           row(field('最低销量/评价数', input('minSales', 'type="number" min="1"')), field('每次搜索采集', input('target', 'type="number" min="1"'))) +
           row(field('卖', '<select data-k="gender" style="' + inputCss + '"><option value="men">男装</option><option value="women">女装</option></select>'), field('进店数量', input('storeCount', 'type="number" min="0"'))) +
           row(field('每家店采集', input('storeTarget', 'type="number" min="1"')), field('最多翻页', input('maxPages', 'type="number" min="1"'))) +
-          check('userFirst', '先采我当前搜索的关键词页面，采完再用内置关键词') +
+          check('userFirst', '把我当前搜索框里的关键词排在第一个（也会先重新搜索再采）') +
           check('enterStore', '高销量商品自动进店铺采集，采完退出店铺继续') +
           row(field('进店销量门槛（≥）', input('storeMinSales', 'type="number" min="0"')), '<span style="flex:1"></span>') +
           '<div style="border-top:1px solid ' + C.line + ';margin:6px 0;padding-top:6px"><strong>T 恤颜色</strong></div>' +
@@ -1682,7 +1682,7 @@ const COLLECTOR_BODY = String.raw`
           hint('不勾选＝所有功能都不用豆包：不审核、不翻译关键词、「豆包帮我想更多词」和「推荐站点」也停用，不产生任何豆包费用。随机生成关键词、像素颜色判断、去重照常工作。') +
           field('豆包 API Key（火山方舟）', input('arkKey', 'type="password"')) +
           field('模型 / 接入点 ID', input('arkModel')) +
-          hint('填文字/看图模型，如 doubao-seed-2-0-pro、doubao-seed-2-0-lite。Seedance 2.0（视频）和 Seedream（画图）不能用于审核和翻译，填了会自动改回。') +
+          hint('填文字/��图模型，如 doubao-seed-2-0-pro、doubao-seed-2-0-lite。Seedance 2.0（视频）和 Seedream（画图）不能用于审核和翻译，填了会自动改回。') +
           check('aiCheck', '用豆包审核每个商品（违规 / IP 侵权）') +
           check('aiVision', '审核时看图（双面 / 满印 / 颜色）') +
           '<div style="border-top:1px solid ' + C.line + ';margin:8px 0;padding-top:8px"><strong>采集同步（灵图插件 Alt+1）</strong></div>' +
@@ -1942,7 +1942,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.11.1' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.11.2' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1964,7 +1964,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.11.1',
+    '// @version      6.11.2',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
