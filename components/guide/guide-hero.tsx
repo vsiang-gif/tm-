@@ -24,12 +24,19 @@ export function GuideHero() {
   >
   安装采集脚本
   </a>
+  <a
+  href="/download"
+  download="collector.user.js"
+  className={buttonVariants({ size: 'lg', variant: 'outline' })}
+  >
+  下载脚本文件
+  </a>
   <a href="#steps" className={buttonVariants({ size: 'lg', variant: 'outline' })}>
             查看安装步骤
           </a>
         </div>
         <p className="text-sm text-muted-foreground">
-          需要先安装 Tampermonkey（篡改猴）扩展，然后再点「安装采集脚本」。
+          需要先安装 Tampermonkey（篡改猴）扩展，然后再点「安装采集脚本」。要发到其他电脑，点「下载脚本文件」，把 collector.user.js 发过去，在那台电脑的油猴「实用工具 → 导入文件」里选中它即可（不要双击运行）。
         </p>
       </div>
       <PanelPreview />
