@@ -211,7 +211,7 @@ const COLLECTOR_BODY = String.raw`
   var RETRY_RE = /^(再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
-  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]/i;
+  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|���ラック|ดำ|đen|hitam|pret[ao]/i;
   var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
@@ -367,7 +367,7 @@ const COLLECTOR_BODY = String.raw`
   }
   function cleanTitle(title) {
     var t = String(title || '');
-    t = t.replace(/秋冬|春秋|秋季|冬季|秋款|冬款/g, '四季').replace(/(四季)+/g, '四季');
+    t = t.replace(/秋冬|春秋|秋季|冬季|秋��|冬款/g, '四季').replace(/(四季)+/g, '四季');
     t = t.replace(/\b(autumn\s*(and|&|\/)\s*winter|fall\s*(and|&|\/)\s*winter|autumn|winter)\b/gi, 'All Season').replace(/(All Season\s*)+/g, 'All Season ');
     t = stripWords(t, removeList);
     t = stripWords(t, cfg.gender === 'men' ? femaleList : maleList);
@@ -565,6 +565,61 @@ const COLLECTOR_BODY = String.raw`
     });
     if (types.indexOf('click') >= 0 && typeof el.click === 'function') { try { el.click(); } catch (e) {} }
   }
+  // Script-dispatched events carry isTrusted=false, and Temu ignores them on「再试一次」. React apps keep the real
+  // handler on the DOM node (__reactProps$xxx), so call it directly with an event object that looks trusted.
+  function reactHandler(el, name) {
+    for (var node = el, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
+      var raw = node;
+      try { if (node.wrappedJSObject) raw = node.wrappedJSObject; } catch (e) {}
+      var keys = [];
+      try { keys = Object.keys(raw); } catch (e) {}
+      for (var i = 0; i < keys.length; i++) {
+        if (!/^__react(Props|EventHandlers)\$/.test(keys[i])) continue;
+        var props = raw[keys[i]];
+        if (props && typeof props[name] === 'function') return { fn: props[name], node: node };
+      }
+    }
+    return null;
+  }
+  function callReact(el, x, y) {
+    var h = reactHandler(el, 'onClick') || reactHandler(el, 'onMouseUp') || reactHandler(el, 'onPointerUp');
+    if (!h) return false;
+    var noop = function () {};
+    var fake = {
+      type: 'click', isTrusted: true, target: el, currentTarget: h.node, button: 0, buttons: 0, detail: 1,
+      clientX: x, clientY: y, pageX: x + scrollX, pageY: y + scrollY, screenX: x + (screenX || 0), screenY: y + (screenY || 0) + 80,
+      altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, defaultPrevented: false,
+      preventDefault: noop, stopPropagation: noop, persist: noop, isDefaultPrevented: function () { return false; }, isPropagationStopped: function () { return false; },
+      timeStamp: performance.now()
+    };
+    fake.nativeEvent = fake;
+    try { h.fn(fake); return true; } catch (e) { return false; }
+  }
+  // Move the pointer in small jittered steps toward the target, rest on it, then press and release with a human hold time.
+  async function humanClick(el) {
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+    await sleep(700 + Math.random() * 600);
+    var r = el.getBoundingClientRect();
+    var x = r.left + r.width * (0.35 + Math.random() * 0.3), y = r.top + r.height * (0.35 + Math.random() * 0.3);
+    var sx = x + (Math.random() - 0.5) * 400, sy = y + 120 + Math.random() * 160, steps = 8 + Math.floor(Math.random() * 8);
+    for (var i = 1; i <= steps; i++) {
+      var t = i / steps, e = t * t * (3 - 2 * t);
+      var px = sx + (x - sx) * e + (Math.random() - 0.5) * 3, py = sy + (y - sy) * e + (Math.random() - 0.5) * 3;
+      var under = document.elementFromPoint(px, py);
+      if (under && !host.contains(under)) fire(under, ['pointermove', 'mousemove'], px, py);
+      await sleep(12 + Math.random() * 28);
+    }
+    var target = document.elementFromPoint(x, y);
+    if (!target || host.contains(target) || !(el.contains(target) || target.contains(el))) target = el;
+    fire(target, ['pointerover', 'pointerenter', 'mouseover', 'mouseenter'], x, y);
+    await sleep(150 + Math.random() * 350);
+    fire(target, ['pointerdown', 'mousedown'], x, y);
+    await sleep(70 + Math.random() * 110);
+    fire(target, ['pointerup', 'mouseup'], x, y);
+    var viaReact = callReact(target, x, y) || (target !== el && callReact(el, x, y));
+    if (!viaReact) fire(target, ['click'], x, y);
+    return viaReact;
+  }
   function hover(el) {
     var r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 3;
     var targets = [el].concat(Array.prototype.slice.call(el.querySelectorAll('img')).slice(0, 2));
@@ -637,7 +692,7 @@ const COLLECTOR_BODY = String.raw`
       if (cfg.handoff === 'click' && btn) {
         var r = btn.getBoundingClientRect();
         fire(btn, ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], r.left + r.width / 2, r.top + r.height / 2);
-        markCard(card, 'ok', '已交给灵图采集并同步');
+        markCard(card, 'ok', '已交给���图采集并同步');
         note = '已点击灵图「采集并同步」';
       } else {
         hover(card);
@@ -1016,17 +1071,27 @@ const COLLECTOR_BODY = String.raw`
       if (isRetry) {
         if (retryClicks >= 8) break;
         retryClicks++;
-        log('出现「' + label + '」，还有商品没加载出来，第 ' + retryClicks + ' 次重新点击');
-        await sleep(1500 + retryClicks * 1000 + Math.random() * 1000);
+        // Repeated failures are usually rate limiting: cool down longer and browse a little like a person before retrying.
+        var cool = retryClicks <= 2 ? 2500 + Math.random() * 2000 : 8000 + retryClicks * 4000 + Math.random() * 6000;
+        log('出现「' + label + '」，等 ' + Math.round(cool / 1000) + ' 秒后第 ' + retryClicks + ' 次模拟人工点击');
+        await sleep(cool);
+        if (retryClicks >= 3) {
+          try { scrollBy({ top: -(300 + Math.random() * 500), behavior: 'smooth' }); } catch (e) {}
+          await sleep(1200 + Math.random() * 1500);
+          try { scrollBy({ top: 200 + Math.random() * 300, behavior: 'smooth' }); } catch (e) {}
+          await sleep(800 + Math.random() * 1000);
+        }
+        if (retryClicks === 5) {
+          notify('需要人工点一下「再试一次」', '脚本连续 4 次点击都没加载出来，请在 Temu 页面上手动点一次「再试一次」，加载出来后脚本会自动接着采。');
+          log('已连续失败 4 次，请手动点一下「再试一次」，脚本等你 90 秒');
+          if (await waitFor(function () { return productCount() > before; }, 90000)) { await sleep(1200); return true; }
+          hit = findMore();
+          if (!hit) return productCount() > before;
+          btn = hit.closest('button, [role="button"], a') || hit;
+        }
       }
-      try { btn.scrollIntoView({ block: 'center' }); } catch (e) {}
-      await sleep(600 + Math.random() * 400);
-      var r = btn.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
-      var target = document.elementFromPoint(x, y) || hit;
-      if (host.contains(target)) target = hit;
-      fire(target, ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], x, y);
-      if ((attempt > 0 || target !== btn) && typeof btn.click === 'function') { try { btn.click(); } catch (e) {} }
-      if (attempt > 0 && hit !== btn && typeof hit.click === 'function') { try { hit.click(); } catch (e) {} }
+      var viaReact = await humanClick(btn);
+      if (!viaReact && hit !== btn) callReact(hit, 0, 0);
       if (!isRetry) log('点击「查看更多」加载下一批' + (attempt ? '（第 ' + (attempt + 1) + ' 次尝试）' : ''));
       var grew = await waitFor(function () { return productCount() > before; }, isRetry ? 9000 : 6000);
       if (grew) { await sleep(1200); return true; }
@@ -1077,7 +1142,7 @@ const COLLECTOR_BODY = String.raw`
     }
     if (!running) queue.length = 0;
     while (pending()) await sleep(800);
-    if (ctx.lowSales) log(ctx.lowSales + ' 个商品销量低于 ' + cfg.minSales + '，没采（本页最高销量 ' + (ctx.maxSales || 0) + '）。想多采可以到「过滤」把「最低销量」调低', !ctx.saved);
+    if (ctx.lowSales) log(ctx.lowSales + ' 个商品销量低于 ' + cfg.minSales + '，没采（本页最高销量 ' + (ctx.maxSales || 0) + '）。想多采可以到「过滤」把���最低销量」调低', !ctx.saved);
     log(ctx.source + '完成：本次保存 ' + ctx.saved + ' 个' + (ctx.saved < ctx.target ? '（没有更多达标商品）' : ''));
   }
 
@@ -2053,7 +2118,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.16.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.17.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2075,7 +2140,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.16.0',
+    '// @version      6.17.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
