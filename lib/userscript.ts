@@ -1042,7 +1042,9 @@ const COLLECTOR_BODY = String.raw`
         if (await clickMore()) { idle = 0; continue; }
         // Paginated sites: go to the next page. Full reloads resume from t.page / t.carry; SPA pages just keep scanning.
         if ((t.page || 0) < cfg.maxPages - 1 && clickNext()) {
-          t.page = (t.page || 0) + 1; t.carry = ctx.saved; setJob(ctx.job);
+          t.page = (t.page || 0) + 1; t.carry = ctx.saved;
+          if (t.type === 'search') t.storeCands = keepStoreCands(ctx.candidates);
+          setJob(ctx.job);
           log('翻到第 ' + (t.page + 1) + ' 页');
           idle = 0;
           await sleep(3500 + Math.random() * 1500);
@@ -1052,12 +1054,7 @@ const COLLECTOR_BODY = String.raw`
       }
       if (scan(ctx) > 0) {
         idle = 0; lastProgress = Date.now();
-        // A high-sales product just showed up: finish what's queued, then leave the search to visit its store.
-        if (storePicks(ctx).length) {
-          while (pending()) await sleep(800);
-          ctx.storeBreak = true;
-          break;
-        }
+        // High-sales products are only remembered here; stores are visited after the whole search is collected.
         continue;
       }
       // While the sync worker rests, nothing else scrolls the page, so loading the next batch is safe.
@@ -1148,25 +1145,27 @@ const COLLECTOR_BODY = String.raw`
     var baseTarget = t.type === 'store' ? cfg.storeTarget : cfg.target;
     var ctx = {
       country: site, task: t, job: job, optional: optional, color: t.color,
-      saved: t.carry || 0, backlog: [], seen: new Set(), candidates: [],
+      saved: t.carry || 0, backlog: [], seen: new Set(), candidates: (t.type === 'search' && t.storeCands) ? t.storeCands.slice() : [],
       target: Math.min(baseTarget, (t.carry || 0) + colorLeft(job, t)),
       source: t.type === 'store' ? '店铺' + t.storeId : t.type === 'search' ? siteLabel(site) + '搜索' : '当前页',
       label: t.type === 'search' ? t.keyword : t.type === 'store' ? '店铺' + t.storeId + (t.keyword ? '「' + t.keyword + '」' : '') : (PLAT.isSearch() ? '搜索页' : '当前页')
     };
     await collectPage(ctx);
     if (!running || t.type !== 'search' || !cfg.enterStore) return;
+    t.storeCands = null;
     var picks = storePicks(ctx);
     if (!picks.length) {
       if ((t.storesEntered || 0) >= cfg.storeCount) log('这个关键词已进了 ' + cfg.storeCount + ' 家店（进店数量上限）');
-      else log('本页没有销量 ≥ ' + cfg.storeMinSales + ' 的商品，不进店（本页最高 ' + (ctx.maxSales || 0) + '）');
+      else log('「' + t.keyword + '」搜索结果里没有销量 ≥ ' + cfg.storeMinSales + ' 的商品，不进店（最高 ' + (ctx.maxSales || 0) + '）');
       return;
     }
+    log('「' + t.keyword + '」搜索页已采完，开始进入高销量店铺（共 ' + picks.length + ' 家候选）');
     var added = 0;
-    // Every store visit remembers the search page it came from, so leaving the store always goes back there.
+    // The search page is fully collected before any store visit, so stores never send the job back to it.
     var back = {
       id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
       site: t.site, keyword: t.keyword, user: t.user, color: t.color,
-      carry: ctx.saved, done: ctx.saved >= ctx.target,
+      carry: ctx.saved, done: true,
       storesEntered: (t.storesEntered || 0) + picks.length,
       returnUrl: isMainSearch() ? location.href : (t.returnUrl || '')
     };
@@ -1187,15 +1186,12 @@ const COLLECTOR_BODY = String.raw`
       added++;
     });
     t.storesEntered = (t.storesEntered || 0) + added;
-    // Left the search early for these stores: come back to the same keyword afterwards and keep going.
-    if (ctx.storeBreak && ctx.saved < ctx.target) {
-      job.tasks.splice(job.idx + 1 + added, 0, {
-        type: 'search', site: t.site, keyword: t.keyword, user: t.user, color: t.color,
-        carry: ctx.saved, storesEntered: t.storesEntered, resumed: true,
-        returnUrl: isMainSearch() ? location.href : ''
-      });
-    }
-    if (added) log('将进入 ' + added + ' 个高销量店铺，采完自动退出' + (ctx.storeBreak ? '，回到「' + t.keyword + '」继续采集' : '继续下一个搜索'));
+    if (added) log('将按销量从高到低进入 ' + added + ' 个店铺，店内搜「' + t.keyword + '」采集，全部采完再进行下一个关键词');
+  }
+  function keepStoreCands(list) {
+    return list.filter(function (x) { return !x.noMetric && x.salesCount >= cfg.storeMinSales; })
+      .sort(function (a, b) { return b.salesCount - a.salesCount; }).slice(0, 20)
+      .map(function (x) { return { key: x.key, goodsId: x.goodsId, salesCount: x.salesCount, salesText: x.salesText, productUrl: x.productUrl }; });
   }
   // Inside a store only the store's own search results for the keyword are collected.
   // No matching products (or no way to search the store) means: close the store and go back to the search page.
@@ -2046,7 +2042,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.14.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.15.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2068,7 +2064,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.14.0',
+    '// @version      6.15.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
