@@ -274,14 +274,21 @@ const COLLECTOR_BODY = String.raw`
   function siteBy(id) { for (var i = 0; i < SITES.length; i++) if (SITES[i].id === id) return SITES[i]; return SITES[0]; }
   function siteLabel(s) { return PNAMES[s.p] + ' ' + s.name; }
   function currentSite() {
-    var seg = location.pathname.split('/')[1] || '', fallback = null, plain = null;
+    // Temu locale segments look like "uk-zh-Hans" / "us-en", so compare the leading country code too.
+    var seg = (location.pathname.split('/')[1] || '').toLowerCase(), segCode = seg.split('-')[0];
+    var fallback = null, plain = null;
     for (var i = 0; i < SITES.length; i++) {
       var s = SITES[i];
       if (s.p !== PKEY) continue;
       if (!fallback) fallback = s;
       if (new URL(s.origin).hostname !== location.hostname) continue;
-      if (s.prefix && s.prefix === seg) return s;
+      if (s.prefix && (s.prefix === seg || s.prefix === segCode)) return s;
       if (!s.prefix && !plain) plain = s;
+    }
+    if (PKEY === 'temu' && segCode !== 'us') {
+      var real = temuRealRegion(), code = real && real.code;
+      if (real && !code) for (var k in TEMU_CUR) if (TEMU_CUR[k] === real.cur && k !== 'de' && k !== 'it' && k !== 'es') { code = k; break; }
+      if (code) for (var j = 0; j < SITES.length; j++) if (SITES[j].id === 'temu-' + code) return SITES[j];
     }
     return plain || fallback;
   }
@@ -1096,7 +1103,7 @@ const COLLECTOR_BODY = String.raw`
     if (found) {
       // keep going
     } else if (cfg.autoResume) {
-      var ok = await waitHuman(t, job, '「' + taskLabel(t) + '」没识别到商品：可能要登录或出现了验证码', function () { return extract(optional).length > 0; });
+      var ok = await waitHuman(t, job, '「' + taskLabel(t) + '」没识别到商品：��能要登录或出现了验证码', function () { return extract(optional).length > 0; });
       if (!running) return;
       if (!ok) { log('等了 30 分钟没处理，跳过「' + taskLabel(t) + '」', true); return; }
     } else if (!extract(optional).length) {
@@ -1935,7 +1942,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.11.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.11.1' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1957,7 +1964,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.11.0',
+    '// @version      6.11.1',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
