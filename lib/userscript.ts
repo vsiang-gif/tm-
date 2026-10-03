@@ -208,7 +208,8 @@ const COLLECTOR_BODY = String.raw`
     /\((\d[\d.,]*)\s*([kK])?\+?\)/,
     /(\d[\d.,]*)\s*([kK])?\s*(?:reviews?|ratings?|bewertungen|avis|valutazioni|reseñas|valoraciones|件の評価|評価)/i
   ];
-  var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม)/i;
+  var RETRY_RE = /^(再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
+  var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
   var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]/i;
   var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
@@ -1007,7 +1008,17 @@ const COLLECTOR_BODY = String.raw`
     if (!hit) return false;
     var btn = hit.closest('button, [role="button"], a') || hit;
     var before = productCount();
-    for (var attempt = 0; attempt < 3; attempt++) {
+    var retryClicks = 0;
+    for (var attempt = 0; attempt < 3 + retryClicks; attempt++) {
+      var label = (hit.innerText || hit.textContent || '').replace(/\s+/g, ' ').trim();
+      var isRetry = RETRY_RE.test(label);
+      // Temu shows「再试一次」when a batch fails to load: keep clicking it (up to 8 times, backing off) instead of treating it as the end of the list.
+      if (isRetry) {
+        if (retryClicks >= 8) break;
+        retryClicks++;
+        log('出现「' + label + '」，还有商品没加载出来，第 ' + retryClicks + ' 次重新点击');
+        await sleep(1500 + retryClicks * 1000 + Math.random() * 1000);
+      }
       try { btn.scrollIntoView({ block: 'center' }); } catch (e) {}
       await sleep(600 + Math.random() * 400);
       var r = btn.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
@@ -1016,14 +1027,14 @@ const COLLECTOR_BODY = String.raw`
       fire(target, ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], x, y);
       if ((attempt > 0 || target !== btn) && typeof btn.click === 'function') { try { btn.click(); } catch (e) {} }
       if (attempt > 0 && hit !== btn && typeof hit.click === 'function') { try { hit.click(); } catch (e) {} }
-      log('点击「查看更多」加载下一批' + (attempt ? '（第 ' + (attempt + 1) + ' 次尝试）' : ''));
-      var grew = await waitFor(function () { return productCount() > before; }, 6000);
+      if (!isRetry) log('点击「查看更多」加载下一批' + (attempt ? '（第 ' + (attempt + 1) + ' 次尝试）' : ''));
+      var grew = await waitFor(function () { return productCount() > before; }, isRetry ? 9000 : 6000);
       if (grew) { await sleep(1200); return true; }
       hit = findMore();
       if (!hit) return productCount() > before;
       btn = hit.closest('button, [role="button"], a') || hit;
     }
-    log('「查看更多」点了 3 次没加载出新商品，可能已到底');
+    log(retryClicks ? '「再试一次」点了 ' + retryClicks + ' 次仍没加载出新商品，先跳过这一批' : '「查看更多」点了 3 次没加载出新商品，可能已到底');
     return false;
   }
   function clickNext() {
@@ -1338,7 +1349,7 @@ const COLLECTOR_BODY = String.raw`
   // Unattended mode: alert the user, keep the job alive, and continue on its own once the page is fixed.
   async function waitHuman(t, job, what, check) {
     waitingHuman = true; t.tries = 0; setJob(job); render();
-    log(what + '。已提醒你，处理好后会自动继续（��多等 30 分钟）', true);
+    log(what + '。已提醒你，处理好后会自动继续（����等 30 分钟）', true);
     notify('采集需要人工处理', siteLabel(currentSite()) + '：' + what);
     var end = Date.now() + 30 * 60000, ok = false;
     while (running && Date.now() < end) {
@@ -2042,7 +2053,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.15.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.16.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2064,7 +2075,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.15.0',
+    '// @version      6.16.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
