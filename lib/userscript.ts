@@ -379,6 +379,12 @@ const COLLECTOR_BODY = String.raw`
   function isGoodsPage() { return !!PLAT.goods(location.href); }
   function isStorePage() { return !!PLAT.store(location.href); }
   function isMainSearch() { return PLAT.isSearch() && !isStorePage() && !PLAT.goods(location.href); }
+  // Site home page such as temu.com/ or temu.com/us-zh-Hans (locale segment only, no product/store/search).
+  function isHomePage() {
+    if (PLAT.isSearch() || isStorePage() || PLAT.goods(location.href) || PLAT.store(location.href)) return false;
+    return /^\/([a-z]{2}(-[A-Za-z]{2,8}){0,2})?\/?$/.test(location.pathname);
+  }
+  function homeUrl(id) { var s = siteBy(id); return s.origin + '/' + (s.prefix ? s.prefix : ''); }
   function cleanImage(src) {
     if (!src || src.indexOf('data:') === 0) return null;
     try {
@@ -1164,7 +1170,25 @@ const COLLECTOR_BODY = String.raw`
         log(siteLabel(siteBy(t.site)) + ' ' + colorName(t) + 'T 已采够 ' + (t.color === 'white' ? cfg.whiteCount : cfg.blackCount) + ' 张，跳过「' + taskLabel(t) + '」');
         job.idx++; setJob(job); continue;
       }
+      // Temu keyword searches start from the site's home page search box, never from inside a store.
+      var viaHome = PKEY === 'temu' && t.type === 'search' && !t.returnUrl && siteBy(t.site).p === PKEY;
+      if (viaHome && !onTaskPage(t) && !t.homeTyped && isHomePage() && currentSite().id === t.site) {
+        t.homeTyped = true; t.navigated = true; setJob(job);
+        log('在 Temu 首页搜索框输入「' + t.keyword + '」并搜索');
+        await sleep(1500 + Math.random() * 1000);
+        if (!(await typeSearch(t.keyword))) location.href = searchUrl(t.site, t.keyword);
+        return;
+      }
       if (!onTaskPage(t)) {
+        if (viaHome && !t.homeTyped) {
+          t.tries = (t.tries || 0) + 1;
+          if (t.tries > 3) { log('打不开 Temu 首页，跳过「' + taskLabel(t) + '」', true); job.idx++; setJob(job); continue; }
+          setJob(job);
+          log('回到 Temu 首页，准备搜索「' + t.keyword + '」');
+          await sleep(1500 + Math.random() * 1500);
+          location.href = homeUrl(t.site);
+          return;
+        }
         t.tries = (t.tries || 0) + 1;
         if (t.tries > 3) { log('打不开「' + taskLabel(t) + '」，跳过', true); job.idx++; setJob(job); continue; }
         t.navigated = true; setJob(job);
@@ -1335,9 +1359,9 @@ const COLLECTOR_BODY = String.raw`
   async function typeSearch(kw) {
     var W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     // Never type into a store/product page's box: that searches inside the store. Open the site-wide search instead.
-    if (!isMainSearch()) {
-      log('当前在店铺/商品页，不在店内搜索，直接打开全站搜索「' + kw + '」');
-      location.href = searchUrl(currentSite().id, kw);
+    if (!isMainSearch() && !isHomePage()) {
+      log('当前在店铺/商品页，不在店内搜索，先回首页再搜「' + kw + '」');
+      location.href = homeUrl(currentSite().id);
       return true;
     }
     var sel = 'input[type="search"], input[name="search_key"], input[name="q"], input[name="k"], input[name="keyword"], input[name="field-keywords"], input[id*="search" i], input[class*="search" i], input[placeholder]';
@@ -1911,7 +1935,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.10.5' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.11.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1933,7 +1957,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.10.5',
+    '// @version      6.11.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
