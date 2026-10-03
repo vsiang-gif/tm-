@@ -975,7 +975,8 @@ const COLLECTOR_BODY = String.raw`
       var target = document.elementFromPoint(x, y) || hit;
       if (host.contains(target)) target = hit;
       fire(target, ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], x, y);
-      if (target !== btn && typeof btn.click === 'function') { try { btn.click(); } catch (e) {} }
+      if ((attempt > 0 || target !== btn) && typeof btn.click === 'function') { try { btn.click(); } catch (e) {} }
+      if (attempt > 0 && hit !== btn && typeof hit.click === 'function') { try { hit.click(); } catch (e) {} }
       log('点击「查看更多」加载下一批' + (attempt ? '（第 ' + (attempt + 1) + ' 次尝试）' : ''));
       var grew = await waitFor(function () { return productCount() > before; }, 6000);
       if (grew) { await sleep(1200); return true; }
@@ -998,7 +999,7 @@ const COLLECTOR_BODY = String.raw`
       fill(ctx);
       if (ctx.backlog.length) { await sleep(800); continue; }
       if (idle >= 6) {
-        if (pending()) { await sleep(800); continue; }
+        if (pending() && !resting) { await sleep(800); continue; }
         if (await clickMore()) { idle = 0; continue; }
         // Paginated sites: go to the next page. Full reloads resume from t.page / t.carry; SPA pages just keep scanning.
         if ((t.page || 0) < cfg.maxPages - 1 && clickNext()) {
@@ -1020,7 +1021,8 @@ const COLLECTOR_BODY = String.raw`
         }
         continue;
       }
-      if (pending()) { await sleep(800); continue; }
+      // While the sync worker rests, nothing else scrolls the page, so loading the next batch is safe.
+      if (pending() && !resting) { await sleep(800); continue; }
       if (findMore() && await clickMore()) { idle = 0; lastProgress = Date.now(); continue; }
       idle++;
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
@@ -1900,7 +1902,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.10.2',
+    '// @version      6.10.3',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
