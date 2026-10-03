@@ -378,6 +378,7 @@ const COLLECTOR_BODY = String.raw`
   }
   function isGoodsPage() { return !!PLAT.goods(location.href); }
   function isStorePage() { return !!PLAT.store(location.href); }
+  function isMainSearch() { return PLAT.isSearch() && !isStorePage() && !PLAT.goods(location.href); }
   function cleanImage(src) {
     if (!src || src.indexOf('data:') === 0) return null;
     try {
@@ -1040,16 +1041,17 @@ const COLLECTOR_BODY = String.raw`
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
   function taskLabel(t) {
-    if (t.type === 'search') return siteLabel(siteBy(t.site)) + (t.user ? ' 你搜的' : ' 搜索') + '「' + t.keyword + '」' + (cfg.colorMode !== 'black' && t.color ? '（' + (t.color === 'white' ? '白T' : '黑T') + '）' : '');
+    if (t.type === 'search') return siteLabel(siteBy(t.site)) + (t.resumed ? ' 退出店铺，回到搜索' : t.user ? ' 你搜的' : ' 搜索') + '「' + t.keyword + '」' + (cfg.colorMode !== 'black' && t.color ? '（' + (t.color === 'white' ? '白T' : '黑T') + '）' : '');
     if (t.type === 'goods') return PNAMES[siteBy(t.site).p] + ' 商品 ' + t.goodsId + ' → 找店铺';
     if (t.type === 'store') return PNAMES[siteBy(t.site).p] + ' 店铺 ' + t.storeId;
     return '当前页';
   }
-  function taskUrl(t) { return t.type === 'search' ? searchUrl(t.site, t.keyword) : t.url; }
+  function taskUrl(t) { return t.type === 'search' ? (t.returnUrl || searchUrl(t.site, t.keyword)) : t.url; }
   function onTaskPage(t) {
     if (t.type === 'here') return location.pathname === t.path;
     if (siteBy(t.site).p !== PKEY) return false;
-    if (t.type === 'search') return currentSite().id === t.site && PLAT.isSearch() && (!!t.navigated || hrefHas(t.keyword));
+    // A store's own search results (e.g. Temu search_result with mall_id) are never the site-wide search.
+    if (t.type === 'search') return currentSite().id === t.site && isMainSearch() && (!!t.navigated || hrefHas(t.keyword));
     if (t.type === 'goods') return PLAT.goods(location.href) === t.goodsId;
     // Some stores (e.g. Shopee /shop/123) redirect to a vanity URL, so accept any non-search, non-product page after navigating.
     if (t.type === 'store') return PLAT.store(location.href) === t.storeId || (!!t.navigated && !PLAT.isSearch() && !PLAT.goods(location.href));
@@ -1093,7 +1095,7 @@ const COLLECTOR_BODY = String.raw`
       if (!ok) { log('等了 30 分钟没处理，跳过「' + taskLabel(t) + '」', true); return; }
     } else if (!extract(optional).length) {
       t.empty = (t.empty || 0) + 1;
-      notify('采集需要人工处理', taskLabel(t) + '：没识别到商品，可能要登录或出现了验证码');
+      notify('采集需要人工处理', taskLabel(t) + '：没识别到商品，��能要登录或出现了验证码');
       if (t.empty === 1) { log('「' + taskLabel(t) + '」没识别到商品：可能要先登录，或出现��验证码。在页面上处理好后点「继续」', true); running = false; return; }
       log('仍然没识别到商品，跳过「' + taskLabel(t) + '」', true);
       return;
@@ -1136,7 +1138,8 @@ const COLLECTOR_BODY = String.raw`
     if (ctx.storeBreak && ctx.saved < ctx.target) {
       job.tasks.splice(job.idx + 1 + added, 0, {
         type: 'search', site: t.site, keyword: t.keyword, user: t.user, color: t.color,
-        carry: ctx.saved, storesEntered: t.storesEntered, resumed: true
+        carry: ctx.saved, storesEntered: t.storesEntered, resumed: true,
+        returnUrl: isMainSearch() ? location.href : ''
       });
     }
     if (added) log('将进入 ' + added + ' 个高销量店铺，采完自动退出' + (ctx.storeBreak ? '，回到「' + t.keyword + '」继续采集' : '继续下一个搜索'));
@@ -1331,9 +1334,16 @@ const COLLECTOR_BODY = String.raw`
   // Types into the site's own search box like a person would (some sites only return results this way).
   async function typeSearch(kw) {
     var W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    // Never type into a store/product page's box: that searches inside the store. Open the site-wide search instead.
+    if (!isMainSearch()) {
+      log('当前在店铺/商品页，不在店内搜索，直接打开全站搜索「' + kw + '」');
+      location.href = searchUrl(currentSite().id, kw);
+      return true;
+    }
     var sel = 'input[type="search"], input[name="search_key"], input[name="q"], input[name="k"], input[name="keyword"], input[name="field-keywords"], input[id*="search" i], input[class*="search" i], input[placeholder]';
     var inp = Array.prototype.find.call(document.querySelectorAll(sel), function (el) {
       if (host.contains(el) || el.type === 'hidden' || el.type === 'checkbox') return false;
+      if (/本店|店内|店铺|this store|in store|this shop|in shop|im shop|dans la boutique|nel negozio|en la tienda/i.test((el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || ''))) return false;
       var r = el.getBoundingClientRect();
       return r.width > 80 && r.height > 15 && r.top < 320;
     });
@@ -1901,7 +1911,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.10.4' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.10.5' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1923,7 +1933,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.10.4',
+    '// @version      6.10.5',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
