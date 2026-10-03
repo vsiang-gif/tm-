@@ -135,6 +135,7 @@ const COLLECTOR_BODY = String.raw`
       isSearch: function () { return /search_result/.test(location.pathname); },
       goods: function (h) { var m = h.match(/-g-(\d{6,})\.html/) || h.match(/[?&]goods_id=(\d{6,})/); return m ? m[1] : null; },
       store: function (h) { var m = h.match(/-m-(\d{6,})\.html/) || h.match(/[?&]mall_id=(\d{6,})/); return m ? m[1] : null; },
+      storeSearch: function (s, id, k) { return s.origin + '/' + (s.prefix ? s.prefix + '/' : '') + 'search_result.html?search_key=' + encodeURIComponent(k) + '&mall_id=' + id + '&search_method=user'; },
       hi: function (u) { return u.split('?')[0]; }
     },
     shein: {
@@ -151,6 +152,7 @@ const COLLECTOR_BODY = String.raw`
       isSearch: function () { return /\/search(\/|$)/.test(location.pathname); },
       goods: function (h) { var m = h.match(/\/listing\/(\d{6,})/); return m ? m[1] : null; },
       store: function (h) { var m = h.match(/\/shop\/([A-Za-z0-9]{3,})(?=[/?#]|$)/); return m ? m[1] : null; },
+      storeSearch: function (s, id, k) { return s.origin + (s.prefix ? '/' + s.prefix : '') + '/shop/' + id + '?search_query=' + encodeURIComponent(k); },
       hi: function (u) { return u.split('?')[0].replace(/il_\d+x[\dN]+\./, 'il_fullxfull.'); }
     },
     amazon: {
@@ -160,6 +162,7 @@ const COLLECTOR_BODY = String.raw`
       goods: function (h) { var m = h.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?=[/?#]|$)/); return m ? m[1] : null; },
       store: function (h) { var m = h.match(/[?&](?:me|seller)=([A-Z0-9]{10,16})(?=[&#]|$)/); return m ? m[1] : null; },
       storeUrl: function (id) { return location.origin + '/s?me=' + id; },
+      storeSearch: function (s, id, k) { return location.origin + '/s?me=' + id + '&k=' + encodeURIComponent(k); },
       hi: function (u) { return u.split('?')[0].replace(/\._[^/]+_\.(jpe?g|png|webp)$/i, '.$1'); }
     },
     shopee: {
@@ -169,6 +172,7 @@ const COLLECTOR_BODY = String.raw`
       goods: function (h) { var m = h.match(/-i\.(\d+)\.(\d+)/) || h.match(/\/product\/(\d+)\/(\d+)/); return m ? m[1] + '.' + m[2] : null; },
       store: function (h) { var m = h.match(/\/shop\/(\d+)/); return m ? m[1] : null; },
       storeFromGoods: function (g) { var id = g.split('.')[0]; return { storeId: id, url: location.origin + '/shop/' + id }; },
+      storeSearch: function (s, id, k) { return location.origin + '/shop/' + id + '/search?keyword=' + encodeURIComponent(k); },
       hi: function (u) { return u.split('?')[0].replace(/_tn$/, ''); }
     },
     lazada: {
@@ -879,7 +883,7 @@ const COLLECTOR_BODY = String.raw`
     if (cfg.saveOriginal) {
       var base = '爆款图案/' + safe(siteLabel(ctx.country)) + '_' + safe(ctx.label) + '_' + today() + '/' + item.salesCount + '_' + safe(item.goodsId);
       await download(item.imageUrl, base + '_原图.' + extOf(item.imageUrl, 'jpg'));
-      await downloadText(['平台站点：' + siteLabel(ctx.country), '原标题：' + item.title, '清洗后标题：' + clean, '销量：' + item.salesText, '链接：' + item.productUrl].join('\n'), base + '_标题.txt');
+      await downloadText(['平台站点：' + siteLabel(ctx.country), '��标题：' + item.title, '清洗后标题：' + clean, '销量：' + item.salesText, '链接：' + item.productUrl].join('\n'), base + '_标题.txt');
       files.push(base + '_原图', base + '_标题.txt');
     }
 
@@ -1056,7 +1060,7 @@ const COLLECTOR_BODY = String.raw`
   function taskLabel(t) {
     if (t.type === 'search') return siteLabel(siteBy(t.site)) + (t.resumed ? ' 退出店铺，回到搜索' : t.user ? ' 你搜的' : ' 搜索') + '「' + t.keyword + '」' + (cfg.colorMode !== 'black' && t.color ? '（' + (t.color === 'white' ? '白T' : '黑T') + '）' : '');
     if (t.type === 'goods') return PNAMES[siteBy(t.site).p] + ' 商品 ' + t.goodsId + ' → 找店铺';
-    if (t.type === 'store') return PNAMES[siteBy(t.site).p] + ' 店铺 ' + t.storeId;
+    if (t.type === 'store') return PNAMES[siteBy(t.site).p] + ' 店铺 ' + t.storeId + (t.keyword ? ' 内搜索「' + t.keyword + '」' : '');
     return '当前页';
   }
   function taskUrl(t) { return t.type === 'search' ? (t.returnUrl || searchUrl(t.site, t.keyword)) : t.url; }
@@ -1087,7 +1091,7 @@ const COLLECTOR_BODY = String.raw`
       var sk = PKEY + ':' + link.storeId;
       if (job.visitedStores.indexOf(sk) >= 0) { log('店铺 ' + link.storeId + ' 已采过，跳过'); return; }
       job.visitedStores.push(sk);
-      job.tasks.splice(job.idx + 1, 0, { type: 'store', site: t.site, storeId: link.storeId, url: link.url, color: t.color });
+      job.tasks.splice(job.idx + 1, 0, storeTask(t.site, link.storeId, link.url, t.keyword, t.color));
       return;
     }
     var optional = PLAT.metric === 'optional' || t.type === 'store';
@@ -1098,6 +1102,11 @@ const COLLECTOR_BODY = String.raw`
       t.typed = true; setJob(job);
       log('网址搜索没出商品，改用页面搜索框重新搜「' + t.keyword + '」');
       if (await typeSearch(t.keyword)) found = await waitFor(hasGoods, 20000);
+    }
+    // In-store keyword search with nothing matching: skip the store instead of syncing unrelated designs.
+    if (!found && t.type === 'store' && t.keyword && (noResultsText() || hrefHas(t.keyword))) {
+      log('店铺 ' + t.storeId + ' 里搜「' + t.keyword + '」没有商品，跳过这家店，回到搜索页继续');
+      return;
     }
     if (!found && t.type === 'search' && noResultsText()) { log('「' + t.keyword + '」在' + siteLabel(siteBy(t.site)) + '确实没有结果，换下一个关键��', true); return; }
     if (found) {
@@ -1120,7 +1129,7 @@ const COLLECTOR_BODY = String.raw`
       saved: t.carry || 0, backlog: [], seen: new Set(), candidates: [],
       target: Math.min(baseTarget, (t.carry || 0) + colorLeft(job, t)),
       source: t.type === 'store' ? '店铺' + t.storeId : t.type === 'search' ? siteLabel(site) + '搜索' : '当前页',
-      label: t.type === 'search' ? t.keyword : t.type === 'store' ? '店铺' + t.storeId : (PLAT.isSearch() ? '搜索页' : '当前页')
+      label: t.type === 'search' ? t.keyword : t.type === 'store' ? '店铺' + t.storeId + (t.keyword ? '「' + t.keyword + '」' : '') : (PLAT.isSearch() ? '搜索页' : '当前页')
     };
     await collectPage(ctx);
     if (!running || t.type !== 'search' || !cfg.enterStore) return;
@@ -1138,7 +1147,7 @@ const COLLECTOR_BODY = String.raw`
         var st = PLAT.storeFromGoods(x.goodsId), key = PKEY + ':' + st.storeId;
         if (job.visitedStores.indexOf(key) >= 0) return;
         job.visitedStores.push(key);
-        task = { type: 'store', site: t.site, storeId: st.storeId, url: st.url, color: t.color };
+        task = storeTask(t.site, st.storeId, st.url, t.keyword, t.color);
       } else {
         task = { type: 'goods', site: t.site, goodsId: x.goodsId, url: x.productUrl, color: t.color };
       }
@@ -1156,6 +1165,12 @@ const COLLECTOR_BODY = String.raw`
       });
     }
     if (added) log('将进入 ' + added + ' 个高销量店铺，采完自动退出' + (ctx.storeBreak ? '，回到「' + t.keyword + '」继续采集' : '继续下一个搜索'));
+  }
+  // Store visits search the store with the same keyword that found the hit product.
+  function storeTask(siteId, storeId, plainUrl, keyword, color) {
+    var url = plainUrl;
+    if (keyword && PLAT.storeSearch) url = PLAT.storeSearch(siteBy(siteId), storeId, keyword);
+    return { type: 'store', site: siteId, storeId: storeId, url: url, plainUrl: plainUrl, keyword: url !== plainUrl ? keyword : '', color: color };
   }
   function storePicks(ctx) {
     var t = ctx.task, job = ctx.job;
@@ -1673,7 +1688,7 @@ const COLLECTOR_BODY = String.raw`
           row(field('黑色占比下限 %', input('darkMin', 'type="number" min="5" max="95"')), field('白色占比下限 %', input('lightMin', 'type="number" min="5" max="95"'))) +
           field('跳过词（标题出现就不采）', '<textarea data-k="skipWords" rows="5" style="' + inputCss + ';resize:vertical"></textarea>') +
           field('标题删除词（上架标题里去掉）', '<textarea data-k="removeWords" rows="5" style="' + inputCss + ';resize:vertical"></textarea>') +
-          hint('另外会自动：删除所有尺码；秋季/冬季/秋冬 → 四季；卖男装删女性词，卖女装删男性词。') +
+          hint('另外会自动：删除所有尺码；秋季/冬季/秋冬 → 四季；��男装删女性词，卖女装删男性词。') +
           '<button data-k="resetWords" style="' + linkCss + '">恢复默认词库</button>' +
         '</div>' +
         '<div data-pane="api" style="display:none">' +
@@ -1858,7 +1873,7 @@ const COLLECTOR_BODY = String.raw`
   $('testPush').onclick = function () {
     beep();
     notify('灵图采集测试提醒', '收到这条说明提醒设置正确。\n' + reportText(today()), { sound: false, force: true }).then(function (ok) {
-      log(cfg.pushType === 'none' ? '已播放提示音（没开微信推送）' : ok ? '测试推送已发送，请看微信' : '微信推送失败，检查 Key', !ok && cfg.pushType !== 'none');
+      log(cfg.pushType === 'none' ? '已播放提示音（没开微信推送）' : ok ? '测试推送已发送，请看微信' : '微��推送失败，检查 Key', !ok && cfg.pushType !== 'none');
     });
   };
   $('report').onclick = exportReport;
@@ -1942,7 +1957,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.11.2' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.12.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1964,7 +1979,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.11.2',
+    '// @version      6.12.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
