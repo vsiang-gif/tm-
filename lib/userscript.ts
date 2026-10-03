@@ -217,7 +217,7 @@ const COLLECTOR_BODY = String.raw`
   var MALE_WORDS = ['男装', '����士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'masculina', 'pria', 'メンズ'];
 
   var DEFAULTS = {
-    arkKey: '', arkModel: 'doubao-seed-2-0-pro',
+    useAi: true, arkKey: '', arkModel: 'doubao-seed-2-0-pro',
     minSales: 20, target: 60, maxPages: 5, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
     enterStore: false, storeCount: 3, storeTarget: 30,
     handoff: 'alt1', clickGap: 3, saveOriginal: false, aiCheck: true, aiVision: true,
@@ -619,6 +619,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   async function doubao(content) {
+    if (!cfg.useAi) throw new Error('豆包功能已关闭，要用请在「豆包/同步」里勾选「启用豆包」');
     if (!cfg.arkKey) throw new Error('请先在「豆包/同步」里填写豆包 API Key');
     if (/seedance|seedream/i.test(cfg.arkModel || '')) {
       cfg.arkModel = DEFAULTS.arkModel;
@@ -854,7 +855,7 @@ const COLLECTOR_BODY = String.raw`
         if (info.light < cfg.lightMin / 100) { markSkipped(item, '非白色或印花太满（白色占比 ' + Math.round(info.light * 100) + '%）'); return false; }
       } else if (info.dark < cfg.darkMin / 100) { markSkipped(item, '非黑色或印花太满（黑色占比 ' + Math.round(info.dark * 100) + '%）'); return false; }
     }
-    if (cfg.aiCheck) {
+    if (cfg.useAi && cfg.aiCheck) {
       var bad = await aiCheck(item);
       if (bad) { markSkipped(item, '豆包：' + bad); return false; }
     }
@@ -1093,7 +1094,7 @@ const COLLECTOR_BODY = String.raw`
     } else if (!extract(optional).length) {
       t.empty = (t.empty || 0) + 1;
       notify('采集需要人工处理', taskLabel(t) + '：没识别到商品，可能要登录或出现了验证码');
-      if (t.empty === 1) { log('「' + taskLabel(t) + '」没识别到商品：可能要先登录，或出现了验证码。在页面上处理好后点「继续」', true); running = false; return; }
+      if (t.empty === 1) { log('「' + taskLabel(t) + '」没识别到商品：可能要先登录，或出现��验证码。在页面上处理好后点「继续」', true); running = false; return; }
       log('仍然没识别到商品，跳过「' + taskLabel(t) + '」', true);
       return;
     }
@@ -1286,6 +1287,7 @@ const COLLECTOR_BODY = String.raw`
       else if (!miss.some(function (m) { return m.lang + '|' + m.kw === key; })) miss.push(p);
     });
     if (!miss.length || !cfg.kwTranslate) return out;
+    if (!cfg.useAi) { log('豆包已关闭，关键词不翻译，外语站点直接用原词搜索'); return out; }
     if (!cfg.arkKey) { log('没填豆包 API Key，关键词不会自动翻译，外语站点会直接用原词搜索', true); return out; }
     log('正在用豆包把 ' + miss.length + ' 个关键词翻译成各站点语言…');
     try {
@@ -1617,7 +1619,7 @@ const COLLECTOR_BODY = String.raw`
         '<div data-pane="auto" style="display:none">' +
           field('定时开工（多��用逗号隔开，如 09:00,20:00）', input('schedule', 'placeholder="留空 = 不定时"')) +
           row(field('每日最多同步（0 = 不限）', input('dailyCap', 'type="number" min="0"')), field('日报推送时间', input('reportTime', 'placeholder="22:00"'))) +
-          row(field('每采几张休息一次', input('restEvery', 'type="number" min="0"')), field('每次休息分钟', input('restMin', 'type="number" min="0"'))) +
+          row(field('每���几张休息一次', input('restEvery', 'type="number" min="0"')), field('每次休息分钟', input('restMin', 'type="number" min="0"'))) +
           check('autoResume', '遇到验证码 / 要登录 / 国家不对：提醒我，处理好后自动继续') +
           check('beep', '需要处理时电脑响提示音') +
           field('微信提醒', '<select data-k="pushType" style="' + inputCss + '"><option value="none">不推送</option><option value="serverchan">Server 酱</option><option value="pushplus">PushPlus</option></select>') +
@@ -1635,6 +1637,8 @@ const COLLECTOR_BODY = String.raw`
         '</div>' +
         '<div data-pane="api" style="display:none">' +
           '<div style="margin-bottom:6px"><strong>豆包审核</strong></div>' +
+          check('useAi', '启用豆包（总开关）') +
+          hint('不勾选＝所有功能都不用豆包：不审核、不翻译关键词、「豆包帮我想更多词」和「推荐站点」也停用，不产生任何豆包费用。随机生成关键词、像素颜色判断、去重照常工作。') +
           field('豆包 API Key（火山方舟）', input('arkKey', 'type="password"')) +
           field('模型 / 接入点 ID', input('arkModel')) +
           hint('填文字/看图模型，如 doubao-seed-2-0-pro、doubao-seed-2-0-lite。Seedance 2.0（视频）和 Seedream（画图）不能用于审核和翻译，填了会自动改回。') +
@@ -1687,7 +1691,7 @@ const COLLECTOR_BODY = String.raw`
     host.querySelectorAll('[data-tab]').forEach(function (b) { b.style.borderBottomColor = b.getAttribute('data-tab') === k ? C.blue : 'transparent'; });
   }
   host.querySelectorAll('[data-tab]').forEach(function (b) { b.onclick = function () { showTab(b.getAttribute('data-tab')); }; });
-  showTab(cfg.arkKey || !cfg.aiCheck ? 'main' : 'api');
+  showTab(cfg.arkKey || !cfg.aiCheck || !cfg.useAi ? 'main' : 'api');
 
   function syncCounts() {
     Object.keys(PLATFORMS).forEach(function (p) {
@@ -1743,6 +1747,23 @@ const COLLECTOR_BODY = String.raw`
     $(k).checked = !!cfg[k];
     $(k).onchange = function () { cfg[k] = $(k).checked; save(); };
   });
+  function applyAiState() {
+    ['aiCheck', 'aiVision', 'kwTranslate', 'genKw', 'recommend', 'arkKey', 'arkModel'].forEach(function (k) {
+      var el = $(k);
+      if (!el) return;
+      el.disabled = !cfg.useAi;
+      var box = el.closest('label') || el;
+      box.style.opacity = cfg.useAi ? '' : '0.4';
+    });
+  }
+  $('useAi').checked = !!cfg.useAi;
+  $('useAi').onchange = function () {
+    cfg.useAi = $('useAi').checked;
+    save();
+    applyAiState();
+    log(cfg.useAi ? '已启用豆包' : '已关闭豆包：审核、翻译、想词、推荐站点全部不调用豆包');
+  };
+  applyAiState();
   $('gender').value = cfg.gender;
   $('gender').onchange = function () {
     var prev = cfg.gender;
@@ -1820,7 +1841,7 @@ const COLLECTOR_BODY = String.raw`
   $('recommend').onclick = function () { recommendSites().catch(function (e) { log(e.message, true); }); };
 
   function preflight() {
-    if (cfg.aiCheck && !cfg.arkKey) { showTab('api'); log('开了豆包审核，请先填写豆包 API Key', true); return false; }
+    if (cfg.useAi && cfg.aiCheck && !cfg.arkKey) { showTab('api'); log('开了豆包审核，请先填写豆包 API Key', true); return false; }
     return true;
   }
   var starting = false;
@@ -1880,7 +1901,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.9.1 · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.10.4' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -1902,7 +1923,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.10.3',
+    '// @version      6.10.4',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
