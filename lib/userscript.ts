@@ -473,7 +473,7 @@ const COLLECTOR_BODY = String.raw`
       out.push({
         goodsId: id, key: PKEY === 'temu' ? id : PKEY + '_' + id, title: title, el: card,
         productUrl: 'https://' + u.hostname + u.pathname, imageUrl: img.src,
-        salesText: found.metric ? found.metric.text : '���销量数据', salesCount: found.metric ? found.metric.count : 0, noMetric: !found.metric
+        salesText: found.metric ? found.metric.text : '�����销量数据', salesCount: found.metric ? found.metric.count : 0, noMetric: !found.metric
       });
     }
     return out;
@@ -1129,6 +1129,8 @@ const COLLECTOR_BODY = String.raw`
   }
   function visible(el) { return el.offsetParent !== null && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; }
   function findMore() {
+    // Amazon has no "load more" button; its "See more" links are sidebar filters. It pages with「下一页」instead.
+    if (isAmazon()) return null;
     var els = document.querySelectorAll('button, [role="button"], a, div, span');
     var best = null, bestBottom = -Infinity;
     for (var i = 0; i < els.length; i++) {
@@ -1210,10 +1212,37 @@ const COLLECTOR_BODY = String.raw`
     log(retryClicks ? '「再试一次」点了 ' + retryClicks + ' 次仍没加载出新商品，先跳过这一批' : '「查看更多」点了 3 次没加载出新商品，可能已到底');
     return false;
   }
-  function clickNext() {
+  function isAmazon() { return /(^|\.)amazon\./i.test(location.hostname); }
+  var NEXT_TEXT_RE = /^(下一页|下一頁|Next|Weiter|Suivant|Siguiente|Successivo|Próximo|Seguinte|次へ)\s*[›>»]?$/i;
+  function findNext() {
     var els = document.querySelectorAll(NEXT_SEL);
-    for (var i = 0; i < els.length; i++) if (visible(els[i])) { els[i].click(); return true; }
-    return false;
+    for (var i = 0; i < els.length; i++) {
+      if (host && host.contains(els[i])) continue;
+      if (visible(els[i]) && !/disabled/i.test(els[i].className || '')) return els[i];
+    }
+    // Text fallback, e.g. Amazon's「下一页 ›」in the bottom pagination bar.
+    var cands = document.querySelectorAll('a, button, [role="button"], [role="link"]');
+    for (var j = 0; j < cands.length; j++) {
+      var el = cands[j];
+      if (host && host.contains(el)) continue;
+      var t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!t || t.length > 12 || !NEXT_TEXT_RE.test(t)) continue;
+      if (/disabled/i.test(el.className || '') || el.getAttribute('aria-disabled') === 'true') continue;
+      if (visible(el)) return el;
+    }
+    return null;
+  }
+  async function clickNext(el) {
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+    await sleep(900 + Math.random() * 900);
+    var href = el.tagName === 'A' ? el.getAttribute('href') : '';
+    await humanClick(el);
+    // Amazon pages are real navigations; if the click was swallowed, follow the link directly.
+    if (href && !/^(#|javascript:)/i.test(href)) {
+      var before = location.href;
+      await sleep(4000);
+      if (location.href === before && document.contains(el)) location.href = new URL(href, location.href).href;
+    }
   }
   async function collectPage(ctx) {
     var idle = 0, t = ctx.task;
@@ -1221,20 +1250,24 @@ const COLLECTOR_BODY = String.raw`
     while (running && ctx.saved < ctx.target && !capReached()) {
       fill(ctx);
       if (ctx.backlog.length) { await sleep(800); continue; }
-      if (idle >= 6) {
+      if (idle >= (isAmazon() ? 2 : 6)) {
         if (pending() && !resting) { await sleep(800); continue; }
         if (await clickMore()) { idle = 0; continue; }
         if (retryGaveUp) { if (await handleRetryGiveUp(ctx)) return; break; }
         // Paginated sites: go to the next page. Full reloads resume from t.page / t.carry; SPA pages just keep scanning.
-        if ((t.page || 0) < cfg.maxPages - 1 && clickNext()) {
+        var nextEl = (t.page || 0) < cfg.maxPages - 1 ? findNext() : null;
+        if (nextEl) {
+          // Save progress before clicking: on Amazon the click navigates away immediately.
           t.page = (t.page || 0) + 1; t.carry = ctx.saved;
           if (t.type === 'search') t.storeCands = keepStoreCands(ctx.candidates);
-          setJob(ctx.job);
-          log('翻到第 ' + (t.page + 1) + ' 页');
+          if (ctx.job) setJob(ctx.job);
+          log('点击「下一页」，翻到第 ' + (t.page + 1) + ' 页');
+          await clickNext(nextEl);
           idle = 0;
           await sleep(3500 + Math.random() * 1500);
           continue;
         }
+        if ((t.page || 0) >= cfg.maxPages - 1) log('已翻到「最多翻页」设置的 ' + cfg.maxPages + ' 页，停止翻页');
         break;
       }
       if (scan(ctx) > 0) {
@@ -1502,7 +1535,7 @@ const COLLECTOR_BODY = String.raw`
           }
           notify('Temu 国家不对', '当前是「' + realName + '」站，需要切换到「' + wantName + '」');
           job.paused = true; t.tries = 0; t.navigated = false; setJob(job); running = false;
-          log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」��Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
+          log('当前 Temu 实际是「' + realName + '��站，不是你选的「' + wantName + '」��Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
           render();
           return;
         }
@@ -1859,7 +1892,7 @@ const COLLECTOR_BODY = String.raw`
     var j = getJob(), t = j && j.tasks[j.idx];
     if (!t) return;
     t.reloads = (t.reloads || 0) + 1;
-    if (t.reloads > 2) { log('「' + taskLabel(t) + '」连续卡住，跳到下一个任务', true); j.idx++; }
+    if (t.reloads > 2) { log('「' + taskLabel(t) + '」连续卡住，跳���下一个任务', true); j.idx++; }
     else { log('6 分钟没有进展，刷新页面后自动续采', true); t.navigated = true; }
     running = false;
     setJob(j);
@@ -2183,7 +2216,7 @@ const COLLECTOR_BODY = String.raw`
   };
   $('testPush').onclick = function () {
     beep();
-    notify('灵图采集测试提醒', '收到这条说明提醒设置正确。\n' + reportText(today()), { sound: false, force: true }).then(function (ok) {
+    notify('灵图采��测试提醒', '收到这条说明提醒设置正确。\n' + reportText(today()), { sound: false, force: true }).then(function (ok) {
       log(cfg.pushType === 'none' ? '已播放提示音（没开微信推送）' : ok ? '测试��送已发送，请看微信' : '微��推送失败，检查 Key', !ok && cfg.pushType !== 'none');
     });
   };
@@ -2278,7 +2311,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.22.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.22.1' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2308,7 +2341,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.22.0',
+    '// @version      6.22.1',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
