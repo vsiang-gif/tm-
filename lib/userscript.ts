@@ -53,6 +53,7 @@ export const SITES: Site[] = [
   site('shein', 'it', '意大利', 'https://it.shein.com', '意大利文', IT),
   site('shein', 'es', '西班牙', 'https://es.shein.com', '西班牙文', ES),
   site('shein', 'mx', '墨西哥', 'https://www.shein.com.mx', '西班牙文', MX),
+  site('shein', 'hk', '香港', 'https://www.shein.com.hk', '英文', EN),
 
   site('etsy', 'us', '全球', 'https://www.etsy.com', '英文', EN),
   site('etsy', 'uk', '英国', 'https://www.etsy.com', '英文', EN, 'uk'),
@@ -211,7 +212,7 @@ const COLLECTOR_BODY = String.raw`
   var RETRY_RE = /^(再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
-  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|�����������ラック|ดำ|đen|hitam|pret[ao]/i;
+  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|�������������ラック|ดำ|đen|hitam|pret[ao]/i;
   var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
@@ -1072,7 +1073,7 @@ const COLLECTOR_BODY = String.raw`
     setJob(ctx.job);
     while (pending()) await sleep(800);
     var wait = 20000 + Math.random() * 25000;
-    log('第 ' + t.reloads + ' 次自动刷新页面（' + Math.round(wait / 1000) + ' 秒后），刷新后从头扫描，已采��自动跳过');
+    log('第 ' + t.reloads + ' 次自动刷新页面（' + Math.round(wait / 1000) + ' 秒后），刷新后从头扫描，��采��自动跳过');
     await sleep(wait);
     if (!running) return true;
     location.reload();
@@ -2153,7 +2154,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.19.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.20.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2171,6 +2172,11 @@ export function buildUserscript() {
     'https://shein.com/*',
     'https://*.shein.co.uk/*',
     'https://*.shein.com.mx/*',
+    'https://*.shein.com.hk/*',
+    'https://shein.com.hk/*',
+    'https://*.shein.tw/*',
+    'https://*.shein.se/*',
+    'https://*.shein.co.nz/*',
     'https://*.etsy.com/*',
     'https://*.aliexpress.com/*',
   ]
@@ -2178,9 +2184,10 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.19.0',
+    '// @version      6.20.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
+    '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
     '// @grant        GM_xmlhttpRequest',
     '// @grant        GM_download',
     '// @grant        GM_getValue',
