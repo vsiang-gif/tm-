@@ -473,7 +473,7 @@ const COLLECTOR_BODY = String.raw`
       out.push({
         goodsId: id, key: PKEY === 'temu' ? id : PKEY + '_' + id, title: title, el: card,
         productUrl: 'https://' + u.hostname + u.pathname, imageUrl: img.src,
-        salesText: found.metric ? found.metric.text : '�����销量数据', salesCount: found.metric ? found.metric.count : 0, noMetric: !found.metric
+        salesText: found.metric ? found.metric.text : '�������销量数据', salesCount: found.metric ? found.metric.count : 0, noMetric: !found.metric
       });
     }
     return out;
@@ -836,17 +836,53 @@ const COLLECTOR_BODY = String.raw`
     }
     var top = extend(seed, -1, Math.round(H * 0.08)), bot = extend(seed, 1, Math.round(H * 0.8));
     if (bot - top < H * 0.15) return null;
+    // Background = pixels like the image corners that connect to the border. The gaps between
+    // stacked/fanned multipack shirts are background, not a print.
+    var bgm = new Uint8Array(W * H), cr = 0, cg = 0, cb = 0, cs = [[1, 1], [W - 2, 1], [1, H - 2], [W - 2, H - 2]];
+    cs.forEach(function (c) { var o = (c[1] * W + c[0]) * 4; cr += px[o]; cg += px[o + 1]; cb += px[o + 2]; });
+    cr /= 4; cg /= 4; cb /= 4;
+    function bgLike(i) { var o = i * 4, a = px[o] - cr, b2 = px[o + 1] - cg, c2 = px[o + 2] - cb; return a * a + b2 * b2 + c2 * c2 < 1600; }
+    var stack = [];
+    for (x = 0; x < W; x++) { stack.push(x, (H - 1) * W + x); }
+    for (y = 0; y < H; y++) { stack.push(y * W, y * W + W - 1); }
+    while (stack.length) {
+      var i0 = stack.pop();
+      if (bgm[i0] || !bgLike(i0)) continue;
+      bgm[i0] = 1;
+      var cx = i0 % W, cy = (i0 - cx) / W;
+      if (cx > 0) stack.push(i0 - 1); if (cx < W - 1) stack.push(i0 + 1);
+      if (cy > 0) stack.push(i0 - W); if (cy < H - 1) stack.push(i0 + W);
+    }
+    var bm = new Uint8Array(W * H);
+    for (var q = 0; q < W * H; q++) bm[q] = isBody(q * 4) ? 1 : 0;
+    // A real print sits inside the shirt: shirt color on all four sides. A second shirt next to it
+    // (black + gray 2-pack, red/black/white 3-pack) is open on one side, so it is not a print.
+    var RX = Math.round(W * 0.2), RY = Math.round(H * 0.18);
+    function enclosed(x1, y1) {
+      var k, okL = false, okR = false, okU = false, okD = false;
+      for (k = 1; k <= RX && !okL; k++) { if (x1 - k < 0 || bgm[y1 * W + x1 - k]) break; okL = !!bm[y1 * W + x1 - k]; }
+      for (k = 1; k <= RX && !okR; k++) { if (x1 + k >= W || bgm[y1 * W + x1 + k]) break; okR = !!bm[y1 * W + x1 + k]; }
+      if (!okL || !okR) return false;
+      for (k = 1; k <= RY && !okU; k++) { if (y1 - k < 0 || bgm[(y1 - k) * W + x1]) break; okU = !!bm[(y1 - k) * W + x1]; }
+      for (k = 1; k <= RY && !okD; k++) { if (y1 + k >= H || bgm[(y1 + k) * W + x1]) break; okD = !!bm[(y1 + k) * W + x1]; }
+      return okU && okD;
+    }
     var tot = 0, nd = 0, nl = 0, off = 0, edges = 0;
     for (y = top; y <= bot; y++) {
       var r = rows[y]; if (!r) continue;
       var span = r.hi - r.lo, il = Math.max(r.lo + Math.round(span * 0.12), Math.round(W * 0.18)), ir = Math.min(r.hi - Math.round(span * 0.12), Math.round(W * 0.82));
       for (x = il; x < ir; x++) {
-        var o2 = (y * W + x) * 4, mx = Math.max(px[o2], px[o2 + 1], px[o2 + 2]), mn = Math.min(px[o2], px[o2 + 1], px[o2 + 2]);
+        var pi = y * W + x;
+        if (bgm[pi]) continue;
+        var o2 = pi * 4, mx = Math.max(px[o2], px[o2 + 1], px[o2 + 2]), mn = Math.min(px[o2], px[o2 + 1], px[o2 + 2]);
         tot++;
         if (mx < 75 && mx - mn < 45) nd++; else if (mn > 185 && mx - mn < 40) nl++;
-        if (!isBody(o2)) off++;
+        var body = bm[pi];
+        if (!body && enclosed(x, y)) off++;
         var l0 = L(o2);
-        if (Math.abs(l0 - L(o2 + 4)) > 38 || (y < bot && Math.abs(l0 - L(o2 + W * 4)) > 38)) edges++;
+        var eR = x + 1 < W && !bgm[pi + 1] && Math.abs(l0 - L(o2 + 4)) > 38;
+        var eD = y < bot && !bgm[pi + W] && Math.abs(l0 - L(o2 + W * 4)) > 38;
+        if ((eR || eD) && enclosed(x, y)) edges++;
       }
     }
     if (tot < 300) return null;
@@ -1014,7 +1050,9 @@ const COLLECTOR_BODY = String.raw`
   }
   var PLAIN_RE = /(^|[^a-z])(plain|solid|blank|basic|einfarbig|unifarben|uni|liso|lisa|tinta unita|semplice)([^a-z]|$)|纯色|纯白|纯黑|素色|素面|无图案|无印花|空白|光板|基础款|打底|無地|무지/i;
   var PRINT_RE = /graphic|print|pattern|design|logo|letter|slogan|druck|motif|imprim|estampad|stampa|印花|图案|圖案|字母|文字|プリント|프린트/i;
-  function isPlainTitle(t) { t = String(t || ''); return PLAIN_RE.test(t) && !PRINT_RE.test(t); }
+  // 2/3/6-packs of basic tees ("3 件装", "6-Pack", "Pack of 4", "Multipack") are almost always plain colors.
+  var MULTI_RE = /([2-9]|1\d)\s*(件装|件套|件入|枚組|枚セット|入り|장|-?\s*(pack|pk|pcs|pieces|piece|stück|stuck|pièces|pezzi|piezas|unidades|teile))(?![a-z])|(pack|set|lot)\s*(of|de|di|von)\s*([2-9]|1\d)(?!\d)|multi\s*-?\s*pack|value\s*pack|(\d+)\s*er[\s-]*(pack|set)/i;
+  function isPlainTitle(t) { t = String(t || ''); return (PLAIN_RE.test(t) || MULTI_RE.test(t)) && !PRINT_RE.test(t); }
   async function processItem(item) {
     var ctx = item.ctx;
     if (isKnown(item.key)) { stats.dup++; markCard(liveCard(item), 'warn', '已处理过，不重复采'); return false; }
@@ -1297,7 +1335,7 @@ const COLLECTOR_BODY = String.raw`
     if (t.type === 'search') return siteLabel(siteBy(t.site)) + (t.resumed ? ' 退出店铺，回到搜索' : t.user ? ' 你搜的' : ' 搜索') + '「' + t.keyword + '」' + (cfg.colorMode !== 'black' && t.color ? '（' + (t.color === 'white' ? '白T' : '黑T') + '）' : '');
     if (t.type === 'goods') return PNAMES[siteBy(t.site).p] + ' 商品 ' + t.goodsId + ' → 找店铺';
     if (t.type === 'store') return PNAMES[siteBy(t.site).p] + ' 店铺 ' + t.storeId + (t.keyword ? ' 内搜索「' + t.keyword + '」' : '');
-    return '当前页';
+    return '���前页';
   }
   function taskUrl(t) { return t.type === 'search' ? (t.returnUrl || searchUrl(t.site, t.keyword)) : t.url; }
   function onTaskPage(t) {
@@ -1615,7 +1653,7 @@ const COLLECTOR_BODY = String.raw`
     ['印花', 'graphic'], ['图案', 'graphic'], ['字母', 'letter print'], ['文字', 'text print'], ['复古', 'vintage'], ['搞笑', 'funny'],
     ['幽默', 'funny'], ['潮流', 'streetwear'], ['街头', 'streetwear'], ['骷髅', 'skull'], ['动漫', 'anime'], ['卡通', 'cartoon'],
     ['摇滚', 'rock'], ['乐队', 'band'], ['健身', 'gym'], ['猫', 'cat'], ['狗', 'dog'], ['龙', 'dragon'], ['老鹰', 'eagle'],
-    ['美国', 'american'], ['国旗', 'flag'], ['摩托', 'motorcycle'], ['汽车', 'car'], ['钓鱼', 'fishing'], ['游戏', 'gaming'],
+    ['美国', 'american'], ['国旗', 'flag'], ['摩���', 'motorcycle'], ['汽车', 'car'], ['钓鱼', 'fishing'], ['游戏', 'gaming'],
     ['T恤衫', 't shirt'], ['T恤', 't shirt'], ['t恤', 't shirt'], ['体恤', 't shirt'], ['衬衫', 't shirt'], ['上衣', 'top'],
     ['男士', 'men'], ['男款', 'men'], ['男装', 'men'], ['男', 'men'], ['女士', 'women'], ['女款', 'women'], ['女', 'women']
   ];
@@ -1976,7 +2014,7 @@ const COLLECTOR_BODY = String.raw`
       '<button data-k="min" aria-label="收���" style="background:none;border:0;color:' + C.dim + ';cursor:pointer;font-size:16px">–</button></div>' +
     '<div data-k="body">' +
       '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '站点') + tabBtn('filter', '过滤') + tabBtn('auto', '自动') + tabBtn('api', '豆包/去重') + '</div>' +
-      '<div style="max-height:52vh;overflow:auto;padding-right:2px">' +
+      '<div data-k="scroll" style="max-height:52vh;overflow:auto;padding-right:2px">' +
         '<div data-pane="main">' +
           row(field('最低销量/评价数', input('minSales', 'type="number" min="1"')), field('每次搜索采集', input('target', 'type="number" min="1"'))) +
           row(field('卖', '<select data-k="gender" style="' + inputCss + '"><option value="men">男装</option><option value="women">女装</option></select>'), field('进店数量', input('storeCount', 'type="number" min="0"'))) +
@@ -2065,7 +2103,8 @@ const COLLECTOR_BODY = String.raw`
       '<div data-k="today" style="margin-top:4px;font-size:12px;color:' + C.text + '"></div>' +
       '<div data-k="stats" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px;color:' + C.dim + '"></div>' +
       '<div data-k="log" style="margin-top:6px;max-height:110px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;color:' + C.cyan + '"></div>' +
-    '</div>');
+    '</div>' +
+    '<div data-k="resize" title="拖动缩放面板（双击恢复默认）" aria-label="缩放面板" style="position:absolute;right:0;bottom:0;width:22px;height:22px;cursor:nwse-resize;touch-action:none;border-bottom-right-radius:10px;background:linear-gradient(135deg,transparent 0 50%,' + C.dim + ' 50% 58%,transparent 58% 68%,' + C.dim + ' 68% 76%,transparent 76% 86%,' + C.dim + ' 86% 94%,transparent 94%)"></div>');
   host.id = 'temu-lingtu-collector-panel';
   // Some sites re-render <body> during hydration and drop foreign nodes, so mount on <html> and re-attach if removed.
   function mountPanel() {
@@ -2177,6 +2216,50 @@ const COLLECTOR_BODY = String.raw`
     save(); compileRules(); log('已恢复默认词库');
   };
   $('min').onclick = function () { var b = $('body'); b.style.display = b.style.display === 'none' ? '' : 'none'; };
+  // Bottom-right corner handle: drag to resize width and the settings area height; size is remembered.
+  (function () {
+    var grip = $('resize'), scroll = $('scroll');
+    if (!grip || !scroll) return;
+    function apply(sz) {
+      if (!sz) { host.style.width = '350px'; scroll.style.maxHeight = '52vh'; return; }
+      host.style.width = Math.max(300, Math.min(window.innerWidth - 20, sz.w)) + 'px';
+      scroll.style.maxHeight = Math.max(120, Math.min(window.innerHeight - 260, sz.h)) + 'px';
+    }
+    apply(GM_getValue('panelSize', null));
+    grip.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      var r = host.getBoundingClientRect();
+      // Pin the top-left corner so dragging the bottom-right corner grows right/down.
+      host.style.left = r.left + 'px'; host.style.top = r.top + 'px';
+      host.style.right = 'auto'; host.style.bottom = 'auto';
+      var sx = e.clientX, sy = e.clientY, w0 = r.width, h0 = scroll.getBoundingClientRect().height, sz = null;
+      try { grip.setPointerCapture(e.pointerId); } catch (err) {}
+      function move(ev) {
+        sz = { w: w0 + ev.clientX - sx, h: h0 + ev.clientY - sy };
+        sz.w = Math.min(sz.w, window.innerWidth - r.left - 4);
+        sz.h = Math.min(sz.h, window.innerHeight - r.top - (r.height - h0) - 4);
+        apply(sz);
+      }
+      function up() {
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        var nr = host.getBoundingClientRect();
+        // Re-anchor to the bottom-right so the panel stays put when the window is resized.
+        host.style.left = 'auto'; host.style.top = 'auto';
+        host.style.right = Math.max(0, window.innerWidth - nr.right) + 'px';
+        host.style.bottom = Math.max(0, window.innerHeight - nr.bottom) + 'px';
+        if (sz) GM_setValue('panelSize', { w: Math.round(host.getBoundingClientRect().width), h: Math.round(scroll.getBoundingClientRect().height) });
+      }
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+    });
+    grip.addEventListener('dblclick', function () {
+      GM_setValue('panelSize', null); apply(null);
+      host.style.right = '20px'; host.style.bottom = '20px';
+    });
+  })();
   $('clear').onclick = function () {
     if (!confirm('之前被审核跳过的商品会重新审核（会再用豆包），已同步到灵图的仍然不会重复。确定吗？')) return;
     refreshSets();
@@ -2341,7 +2424,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.22.1',
+    '// @version      6.23.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
