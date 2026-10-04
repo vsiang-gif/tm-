@@ -211,7 +211,7 @@ const COLLECTOR_BODY = String.raw`
   var RETRY_RE = /^(再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
-  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|���������ラック|ดำ|đen|hitam|pret[ao]/i;
+  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|�����������ラック|ดำ|đen|hitam|pret[ao]/i;
   var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
@@ -1072,7 +1072,7 @@ const COLLECTOR_BODY = String.raw`
     setJob(ctx.job);
     while (pending()) await sleep(800);
     var wait = 20000 + Math.random() * 25000;
-    log('第 ' + t.reloads + ' 次自动刷新页面（' + Math.round(wait / 1000) + ' 秒后），刷新后从头扫描，已采的自动跳过');
+    log('第 ' + t.reloads + ' 次自动刷新页面（' + Math.round(wait / 1000) + ' 秒后），刷新后从头扫描，已采��自动跳过');
     await sleep(wait);
     if (!running) return true;
     location.reload();
@@ -1796,7 +1796,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- panel ----------
-  var C = { bg: '#161616', panel: '#202020', line: '#343434', text: '#f1f1ec', dim: '#a3a39c', blue: '#2f55e4', red: '#ff7a6b' };
+  var C = { bg: '#161616', panel: '#202020', line: '#343434', text: '#f1f1ec', dim: '#a3a39c', blue: '#2f55e4', red: '#ff5c5c', green: '#3ee07a', yellow: '#ffd23f', cyan: '#4fd8ff' };
   var inputCss = 'width:100%;box-sizing:border-box;padding:5px 7px;border-radius:5px;border:1px solid ' + C.line + ';background:' + C.panel + ';color:inherit;font:inherit';
   var btnCss = 'flex:1;padding:7px;border-radius:6px;border:1px solid ' + C.line + ';background:' + C.panel + ';color:inherit;cursor:pointer;font:inherit';
   var linkCss = 'background:none;border:0;color:' + C.dim + ';cursor:pointer;padding:0;font:inherit;text-decoration:underline';
@@ -1816,11 +1816,15 @@ const COLLECTOR_BODY = String.raw`
       '<div style="display:flex;flex-wrap:wrap">' + rows + '</div></details>';
   }).join('');
 
+  // SHEIN enforces Trusted Types; a raw innerHTML string throws there and the panel never appears.
+  var ttPolicy = null;
+  try { if (window.trustedTypes && trustedTypes.createPolicy) ttPolicy = trustedTypes.createPolicy('lingtuCollector', { createHTML: function (x) { return x; } }); } catch (e) {}
+  function safeHTML(x) { return ttPolicy ? ttPolicy.createHTML(x) : x; }
   var host = document.createElement('div');
   host.setAttribute('style', 'position:fixed;right:20px;bottom:20px;z-index:2147483647;width:350px;background:' + C.bg + ';color:' + C.text + ';font:13px/1.5 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.4);padding:14px');
-  host.innerHTML =
+  host.innerHTML = safeHTML(
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong style="font-size:14px">爆款图案采集 → 灵图 · ' + PNAMES[PKEY] + '</strong>' +
-      '<button data-k="min" aria-label="收起" style="background:none;border:0;color:' + C.dim + ';cursor:pointer;font-size:16px">–</button></div>' +
+      '<button data-k="min" aria-label="收���" style="background:none;border:0;color:' + C.dim + ';cursor:pointer;font-size:16px">–</button></div>' +
     '<div data-k="body">' +
       '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '站点') + tabBtn('filter', '过滤') + tabBtn('auto', '自动') + tabBtn('api', '豆包/去重') + '</div>' +
       '<div style="max-height:52vh;overflow:auto;padding-right:2px">' +
@@ -1906,12 +1910,15 @@ const COLLECTOR_BODY = String.raw`
       '<div data-k="job" style="font-size:12px;color:' + C.dim + '"></div>' +
       '<div data-k="today" style="margin-top:4px;font-size:12px;color:' + C.text + '"></div>' +
       '<div data-k="stats" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px;color:' + C.dim + '"></div>' +
-      '<div data-k="log" style="margin-top:6px;max-height:110px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;color:' + C.dim + '"></div>' +
-    '</div>';
+      '<div data-k="log" style="margin-top:6px;max-height:110px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;color:' + C.cyan + '"></div>' +
+    '</div>');
   host.id = 'temu-lingtu-collector-panel';
   // Some sites re-render <body> during hydration and drop foreign nodes, so mount on <html> and re-attach if removed.
   function mountPanel() {
-    if (!host.isConnected) (document.documentElement || document.body).appendChild(host);
+    if (!host.isConnected) {
+      try { (document.documentElement || document.body).appendChild(host); }
+      catch (e) { if (document.body) document.body.appendChild(host); }
+    }
     host.style.display = '';
   }
   mountPanel();
@@ -2050,7 +2057,7 @@ const COLLECTOR_BODY = String.raw`
       hs.forEach(function (x) { seenK[x.k] = 1; });
       (data.hashes || []).forEach(function (x) { if (x && x.h && !seenK[x.k]) { hs.push(x); seenK[x.k] = 1; } });
       GM_setValue('synced', Array.from(synced)); GM_setValue('done', Array.from(done)); GM_setValue('hashes', hs); hashes = hs;
-      log('已导入去重库：新增已同步 ' + (synced.size - before) + ' 张，共 ' + synced.size + ' 张'); render();
+      log('已导入去重库：新增已同步 ' + (synced.size - before) + ' 张，共 ' + synced.size + ' ���'); render();
     }).catch(function (e) { log('导入失败：' + e.message, true); });
   };
   $('testPush').onclick = function () {
@@ -2090,12 +2097,12 @@ const COLLECTOR_BODY = String.raw`
     if (capReached()) { log('今日已达每日上限 ' + cfg.dailyCap + '，到「自动」里调高或改成 0', true); return; }
     if (cfg.kwAutoRand) { addRandomKeywords(); kwHistInfo(); }
     if (!splitKeywords(cfg.myKeywords).length) { showTab('country'); log('请先在「站点」里填写关键词', true); return; }
-    starting = true;
+    starting = true; render();
     try {
       var tasks = withUserFirst(await buildTasks());
       if (!tasks.length) { showTab('country'); log('请至少勾选一个站点', true); return; }
       startJob(tasks);
-    } finally { starting = false; }
+    } finally { starting = false; render(); }
   };
   $('here').onclick = function () {
     if (getJob()) { log('已有任务，请先「结束任务」'); return; }
@@ -2121,13 +2128,19 @@ const COLLECTOR_BODY = String.raw`
   function log(msg, err) {
     var line = document.createElement('div');
     line.textContent = new Date().toTimeString().slice(0, 8) + ' ' + msg;
-    if (err) line.style.color = C.red;
+    line.style.color = err || /失败|出错|错误|验证码|请先|请手动/.test(msg) ? C.red
+      : /已保存|已同步|同步成功|通过|完成|就绪/.test(msg) ? C.green
+      : /跳过|休息|等|暂停|不采|已采够|再试一次/.test(msg) ? C.yellow : C.cyan;
     $('log').prepend(line);
     while ($('log').childNodes.length > 80) $('log').lastChild.remove();
   }
   function render() {
     var j = getJob();
     $('pause').textContent = j && !running ? '继续' : '暂停';
+    var sb = $('start');
+    sb.textContent = j ? (running ? '采集中…' : '已暂停') : starting ? '准备中…' : '开始多站点采集';
+    sb.style.background = j ? (running ? '#16a34a' : '#b7791f') : C.blue;
+    sb.style.cursor = j || starting ? 'default' : 'pointer';
     $('pause').disabled = !j;
     $('store').style.display = isGoodsPage() && !j ? '' : 'none';
     $('job').textContent = j ? '任务 ' + Math.min(j.idx + 1, j.tasks.length) + '/' + j.tasks.length + '：' + (j.tasks[j.idx] ? taskLabel(j.tasks[j.idx]) : '收尾') + (j.paused ? '（已暂停）' : '') : '没有进行中的任务';
@@ -2140,7 +2153,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.18.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.19.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2155,6 +2168,9 @@ export function buildUserscript() {
     ...Array.from(hosts, (h) => 'https://' + h + '/*'),
     'https://*.temu.com/*',
     'https://*.shein.com/*',
+    'https://shein.com/*',
+    'https://*.shein.co.uk/*',
+    'https://*.shein.com.mx/*',
     'https://*.etsy.com/*',
     'https://*.aliexpress.com/*',
   ]
@@ -2162,7 +2178,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.18.0',
+    '// @version      6.19.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @grant        GM_xmlhttpRequest',
