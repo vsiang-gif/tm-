@@ -31,6 +31,13 @@ export function GuideHero() {
   >
   下载脚本文件
   </a>
+  <a
+  href="/download/lan-server"
+  download="lan-dedupe-server.js"
+  className={buttonVariants({ size: 'lg', variant: 'outline' })}
+  >
+  下载局域网去重库
+  </a>
   <a href="#steps" className={buttonVariants({ size: 'lg', variant: 'outline' })}>
             查看安装步骤
           </a>

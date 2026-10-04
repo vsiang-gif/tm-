@@ -234,7 +234,8 @@ const COLLECTOR_BODY = String.raw`
     storeMinSales: 500, userFirst: false, colorMode: 'black', blackCount: 30, whiteCount: 30, lightMin: 35,
     myKeywords: '', kwTranslate: true,
     kwRandCount: 10, kwRandColor: 'both', kwAutoRand: false,
-    noPlain: true, printMin: 3, kwScope: 'all'
+    noPlain: true, printMin: 3, kwScope: 'all',
+    lanUrl: '', deviceName: ''
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
   if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel) || /seedance|seedream/i.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
@@ -473,7 +474,7 @@ const COLLECTOR_BODY = String.raw`
       out.push({
         goodsId: id, key: PKEY === 'temu' ? id : PKEY + '_' + id, title: title, el: card,
         productUrl: 'https://' + u.hostname + u.pathname, imageUrl: img.src,
-        salesText: found.metric ? found.metric.text : '���销量数据', salesCount: found.metric ? found.metric.count : 0, noMetric: !found.metric
+        salesText: found.metric ? found.metric.text : '�����销量数据', salesCount: found.metric ? found.metric.count : 0, noMetric: !found.metric
       });
     }
     return out;
@@ -904,6 +905,36 @@ const COLLECTOR_BODY = String.raw`
     GM_setValue('hashes', hashes);
   }
   function isKnown(key) { refreshSets(); return synced.has(key) || done.has(key); }
+
+  // ---------- LAN shared dedupe (one lan-dedupe-server.js shared by every computer on the network) ----------
+  var lanWarnAt = 0;
+  function lanBase() { return String(cfg.lanUrl || '').trim().replace(/\/+$/, ''); }
+  function deviceName() {
+    if (!cfg.deviceName) { cfg.deviceName = '电脑-' + Math.random().toString(36).slice(2, 6).toUpperCase(); save(); }
+    return cfg.deviceName;
+  }
+  async function lanCall(path, body) {
+    var base = lanBase();
+    if (!base) return null;
+    if (!/^https?:\/\//i.test(base)) base = 'http://' + base;
+    try {
+      var r = await gmRequest({ method: 'POST', url: base + path, timeout: 6000, headers: { 'content-type': 'application/json' }, data: JSON.stringify(body || {}) });
+      if (r.status >= 400) throw new Error('HTTP ' + r.status);
+      return JSON.parse(r.responseText);
+    } catch (e) {
+      if (Date.now() - lanWarnAt > 60000) { lanWarnAt = Date.now(); log('连不上局域网去重库（' + e.message + '），本机先只用自己的去重库', true); }
+      return null;
+    }
+  }
+  async function lanCheck(item, hash) {
+    var r = await lanCall('/check', { key: item.key, hash: hash || '' });
+    return r && r.known ? r.reason : null;
+  }
+  async function lanClaim(item, hash) {
+    var r = await lanCall('/claim', { key: item.key, hash: hash || '', device: deviceName() });
+    return r && r.ok === false ? r.reason : null;
+  }
+  function lanRelease(item) { return lanCall('/release', { key: item.key }); }
   function pushRecord(rec) {
     rec.time = new Date().toISOString();
     records = GM_getValue('records', []);
@@ -1018,6 +1049,8 @@ const COLLECTOR_BODY = String.raw`
   async function processItem(item) {
     var ctx = item.ctx;
     if (isKnown(item.key)) { stats.dup++; markCard(liveCard(item), 'warn', '已处理过，不重复采'); return false; }
+    var lanEarly = await lanCheck(item);
+    if (lanEarly) { markDup(item, '局域网：' + lanEarly); return false; }
     if (cfg.noPlain && isPlainTitle(item.title)) { markSkipped(item, '纯色无图案（标题）'); return false; }
     var info = null;
     if (cfg.imgDedupe || cfg.noPlain || (cfg.blackOnly && cfg.pixelCheck)) {
@@ -1052,10 +1085,12 @@ const COLLECTOR_BODY = String.raw`
     if (isKnown(item.key)) { stats.dup++; markCard(liveCard(item), 'warn', '其他标签页刚采过'); return false; }
     twin = info && cfg.imgDedupe ? similarSynced(info.hash) : null;
     if (twin) { markDup(item, '图案和已同步的 ' + twin.k + ' 几乎一样'); return false; }
+    var lanTaken = await lanClaim(item, cfg.imgDedupe && info ? info.hash : '');
+    if (lanTaken) { markDup(item, '局域网：' + lanTaken); return false; }
     markSynced(item, info && info.hash);
     var res = await handoff(item);
     if (res.already) { pushRecord(recOf(item, '灵图已同步过', res.note)); stats.dup++; bump('dup'); log('去重 ' + item.goodsId + '：' + res.note); return false; }
-    if (!res.ok) { unmarkSynced(item); stats.failed++; bump('failed'); log('交给灵图失败 ' + item.goodsId + '：' + res.note, true); return false; }
+    if (!res.ok) { unmarkSynced(item); lanRelease(item); stats.failed++; bump('failed'); log('交给灵图失败 ' + item.goodsId + '：' + res.note, true); return false; }
     pushRecord(recOf(item, cfg.handoff === 'mark' ? '已标记' : '已采集并同步', res.note, { cleanTitle: clean, files: files.join(' | ') }));
     bump('saved', siteLabel(ctx.country));
     return true;
@@ -1502,7 +1537,7 @@ const COLLECTOR_BODY = String.raw`
           }
           notify('Temu 国家不对', '当前是「' + realName + '」站，需要切换到「' + wantName + '」');
           job.paused = true; t.tries = 0; t.navigated = false; setJob(job); running = false;
-          log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」��Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
+          log('当前 Temu 实际是「' + realName + '��站，不是你选的「' + wantName + '」��Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
           render();
           return;
         }
@@ -1859,7 +1894,7 @@ const COLLECTOR_BODY = String.raw`
     var j = getJob(), t = j && j.tasks[j.idx];
     if (!t) return;
     t.reloads = (t.reloads || 0) + 1;
-    if (t.reloads > 2) { log('「' + taskLabel(t) + '」连续卡住，跳到下一个任务', true); j.idx++; }
+    if (t.reloads > 2) { log('「' + taskLabel(t) + '」连续卡住，跳���下一个任务', true); j.idx++; }
     else { log('6 分钟没有进展，刷新页面后自动续采', true); t.navigated = true; }
     running = false;
     setJob(j);
@@ -2020,6 +2055,11 @@ const COLLECTOR_BODY = String.raw`
           '<div style="display:flex;gap:6px;margin-bottom:6px"><button data-k="exportDb" style="' + btnCss + '">备份去重库</button><button data-k="importDb" style="' + btnCss + '">导入去重库</button></div>' +
           '<input data-k="dbFile" type="file" accept=".json,application/json" style="display:none">' +
           hint('重装油猴或换电脑前先备份，导入后旧商品不会再被同步。') +
+          '<div style="border-top:1px solid ' + C.line + ';margin:8px 0;padding-top:8px"><strong>局域网多台电脑共享去重</strong></div>' +
+          hint('在局域网里任选一台电脑运行「局域网去重库」（下载 lan-dedupe-server.js，装好 Node.js 后执行 node lan-dedupe-server.js），把它显示的地址填到每台电脑这里。一台采过的商品和相似图案，其他电脑都不会再采。留空＝不共享。') +
+          field('去重库地址', input('lanUrl', 'placeholder="例如 http://192.168.1.10:8787"')) +
+          field('本机名称（日志里显示是哪台采的）', input('deviceName')) +
+          '<div style="display:flex;gap:6px;margin-bottom:6px"><button data-k="lanTest" style="' + btnCss + '">测试连接</button><button data-k="lanPush" style="' + btnCss + '">把本机记录上传</button></div>' +
           '<button data-k="clear" style="' + linkCss + ';display:block;margin-top:4px">重新审核跳过的商品（已同步的仍不会重复）</button>' +
           '<button data-k="clearSynced" style="' + linkCss + ';display:block;margin-top:6px;color:' + C.red + '">清空全部记录（会重复花灵豆）</button>' +
         '</div>' +
@@ -2158,6 +2198,23 @@ const COLLECTOR_BODY = String.raw`
     ['done', 'synced', 'records', 'hashes'].forEach(function (k) { GM_setValue(k, []); });
     log('已清空全部记录', true); render();
   };
+  deviceName();
+  ['lanUrl', 'deviceName'].forEach(function (k) {
+    $(k).value = cfg[k];
+    $(k).onchange = function () { cfg[k] = $(k).value.trim(); save(); if (k === 'deviceName') deviceName(); $(k).value = cfg[k]; };
+  });
+  $('lanTest').onclick = async function () {
+    if (!lanBase()) { log('请先填写去重库地址', true); return; }
+    lanWarnAt = 0;
+    var r = await lanCall('/ping');
+    if (r && r.ok) log('局域网去重库连接成功：已记录 ' + r.keys + ' 个商品、' + r.hashes + ' 个图案指纹');
+  };
+  $('lanPush').onclick = async function () {
+    if (!lanBase()) { log('请先填写去重库地址', true); return; }
+    refreshSets();
+    var r = await lanCall('/import', { keys: Array.from(synced), hashes: GM_getValue('hashes', []), device: deviceName() });
+    if (r && r.ok) log('已把本机 ' + synced.size + ' 条已同步记录上传到局域网去重库，新增 ' + r.added + ' 条');
+  };
   $('exportDb').onclick = function () {
     refreshSets();
     var data = JSON.stringify({ v: 1, exportedAt: new Date().toISOString(), synced: Array.from(synced), done: Array.from(done), hashes: GM_getValue('hashes', []) });
@@ -2183,7 +2240,7 @@ const COLLECTOR_BODY = String.raw`
   };
   $('testPush').onclick = function () {
     beep();
-    notify('灵图采集测试提醒', '收到这条说明提醒设置正确。\n' + reportText(today()), { sound: false, force: true }).then(function (ok) {
+    notify('灵图采��测试提醒', '收到这条说明提醒设置正确。\n' + reportText(today()), { sound: false, force: true }).then(function (ok) {
       log(cfg.pushType === 'none' ? '已播放提示音（没开微信推送）' : ok ? '测试��送已发送，请看微信' : '微��推送失败，检查 Key', !ok && cfg.pushType !== 'none');
     });
   };
@@ -2278,7 +2335,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.22.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.23.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2308,7 +2365,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.22.0',
+    '// @version      6.23.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
