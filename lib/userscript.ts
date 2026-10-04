@@ -234,7 +234,7 @@ const COLLECTOR_BODY = String.raw`
     storeMinSales: 500, userFirst: false, colorMode: 'black', blackCount: 30, whiteCount: 30, lightMin: 35,
     myKeywords: '', kwTranslate: true,
     kwRandCount: 10, kwRandColor: 'both', kwAutoRand: false,
-    noPlain: true, printMin: 3, kwScope: 'all'
+    noPlain: true, printMin: 3, kwScope: 'temu-us'
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
   if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel) || /seedance|seedream/i.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
@@ -253,6 +253,13 @@ const COLLECTOR_BODY = String.raw`
   });
   delete cfg.countries;
   if (!String(cfg.myKeywords || '').trim()) cfg.myKeywords = splitKeywords(cfg.sites['temu-us'].keyword || SITES[0][cfg.gender]).join('\n');
+  // v6.24: no more shared list. Enabled sites that used the shared list keep it as their own list.
+  if (!cfg.kwPerSite) {
+    SITES.forEach(function (s) { var o = cfg.sites[s.id]; if (!splitKeywords(o.kws).length && o.on) o.kws = splitKeywords(cfg.myKeywords).join('\n'); });
+    cfg.kwPerSite = 1;
+    GM_setValue('cfg', cfg);
+  }
+  if (!cfg.sites[cfg.kwScope]) cfg.kwScope = (SITES.find(function (s) { return cfg.sites[s.id].on; }) || SITES[0]).id;
   var done = new Set(GM_getValue('done', []));
   var records = GM_getValue('records', []);
   // synced = actually sent to 灵图 (costs 灵豆) and must never be sent again; done also includes reviewed-and-skipped items.
@@ -789,7 +796,11 @@ const COLLECTOR_BODY = String.raw`
     function gray(x, y) { var o = (y * 9 + x) * 4; return p[o] * 0.299 + p[o + 1] * 0.587 + p[o + 2] * 0.114; }
     for (var y = 0; y < 8; y++) for (var x = 0; x < 8; x++) bits += gray(x, y) > gray(x + 1, y) ? '1' : '0';
     for (var b = 0; b < 64; b += 4) hex += parseInt(bits.substr(b, 4), 2).toString(16);
-    return { dark: dark, light: light, hash: hex, print: printRatio, shirt: !!shirt };
+    var stairs = stackedShirts(g.getImageData(0, 0, W, H).data, W, H);
+    return {
+      dark: dark, light: light, hash: hex, print: printRatio, shirt: !!shirt,
+      sleeve: shirt ? shirt.sleeve : 0, multiColor: shirt ? shirt.multiColor : 0, stairs: stairs
+    };
   }
   // Finds the top garment by its main color (sampled from the chest sides, where prints rarely sit),
   // walks down row by row until the color stops (pants / skirt / bag start), and measures
@@ -836,29 +847,13 @@ const COLLECTOR_BODY = String.raw`
     }
     var top = extend(seed, -1, Math.round(H * 0.08)), bot = extend(seed, 1, Math.round(H * 0.8));
     if (bot - top < H * 0.15) return null;
-    // Background = pixels like the image corners that connect to the border. The gaps between
-    // stacked/fanned multipack shirts are background, not a print.
-    var bgm = new Uint8Array(W * H), cr = 0, cg = 0, cb = 0, cs = [[1, 1], [W - 2, 1], [1, H - 2], [W - 2, H - 2]];
-    cs.forEach(function (c) { var o = (c[1] * W + c[0]) * 4; cr += px[o]; cg += px[o + 1]; cb += px[o + 2]; });
-    cr /= 4; cg /= 4; cb /= 4;
-    function bgLike(i) { var o = i * 4, a = px[o] - cr, b2 = px[o + 1] - cg, c2 = px[o + 2] - cb; return a * a + b2 * b2 + c2 * c2 < 1600; }
-    var stack = [];
-    for (x = 0; x < W; x++) { stack.push(x, (H - 1) * W + x); }
-    for (y = 0; y < H; y++) { stack.push(y * W, y * W + W - 1); }
-    while (stack.length) {
-      var i0 = stack.pop();
-      if (bgm[i0] || !bgLike(i0)) continue;
-      bgm[i0] = 1;
-      var cx = i0 % W, cy = (i0 - cx) / W;
-      if (cx > 0) stack.push(i0 - 1); if (cx < W - 1) stack.push(i0 + 1);
-      if (cy > 0) stack.push(i0 - W); if (cy < H - 1) stack.push(i0 + W);
-    }
+    // The gaps between stacked/fanned multipack shirts are background, not a print.
+    var bgInfo = bgMask(px, W, H), bgm = bgInfo.m;
     var bm = new Uint8Array(W * H);
     for (var q = 0; q < W * H; q++) bm[q] = isBody(q * 4) ? 1 : 0;
     // A real print sits inside the shirt: shirt color on all four sides. A second shirt next to it
     // (black + gray 2-pack, red/black/white 3-pack) is open on one side, so it is not a print.
-    var RX = Math.round(W * 0.2), RY = Math.round(H * 0.18);
-    function enclosed(x1, y1) {
+    function enclosedR(x1, y1, RX, RY) {
       var k, okL = false, okR = false, okU = false, okD = false;
       for (k = 1; k <= RX && !okL; k++) { if (x1 - k < 0 || bgm[y1 * W + x1 - k]) break; okL = !!bm[y1 * W + x1 - k]; }
       for (k = 1; k <= RX && !okR; k++) { if (x1 + k >= W || bgm[y1 * W + x1 + k]) break; okR = !!bm[y1 * W + x1 + k]; }
@@ -867,26 +862,97 @@ const COLLECTOR_BODY = String.raw`
       for (k = 1; k <= RY && !okD; k++) { if (y1 + k >= H || bgm[(y1 + k) * W + x1]) break; okD = !!bm[(y1 + k) * W + x1]; }
       return okU && okD;
     }
-    var tot = 0, nd = 0, nl = 0, off = 0, edges = 0;
+    var RX0 = Math.round(W * 0.2), RY0 = Math.round(H * 0.18);
+    function enclosed(x1, y1) { return enclosedR(x1, y1, RX0, RY0); }
+    // Torso columns = median body width of the lower shirt rows (below the armpits, no sleeves there).
+    var los = [], his = [];
+    for (y = Math.round(top + (bot - top) * 0.6); y <= bot; y++) if (rows[y]) { los.push(rows[y].lo); his.push(rows[y].hi); }
+    los.sort(function (m, n) { return m - n; }); his.sort(function (m, n) { return m - n; });
+    var tlo = los.length ? los[los.length >> 1] : 0, thi = his.length ? his[his.length >> 1] : W - 1;
+    if (thi - tlo < W * 0.2) { tlo = 0; thi = W - 1; }
+    var tm = Math.round((thi - tlo) * 0.06), sleeveTo = Math.round(top + (bot - top) * 0.45);
+    function skin(o) { var r0 = px[o], g0 = px[o + 1], b0 = px[o + 2]; return r0 > 95 && r0 > g0 && g0 > b0 && r0 - b0 > 25 && r0 - b0 < 140; }
+    var tot = 0, nd = 0, nl = 0, off = 0, edges = 0, sTot = 0, sPrint = 0, fg = 0, other = 0;
     for (y = top; y <= bot; y++) {
       var r = rows[y]; if (!r) continue;
-      var span = r.hi - r.lo, il = Math.max(r.lo + Math.round(span * 0.12), Math.round(W * 0.18)), ir = Math.min(r.hi - Math.round(span * 0.12), Math.round(W * 0.82));
-      for (x = il; x < ir; x++) {
+      var span = r.hi - r.lo, il = Math.max(r.lo + Math.round(span * 0.12), Math.round(W * 0.18), tlo + tm), ir = Math.min(r.hi - Math.round(span * 0.12), Math.round(W * 0.82), thi - tm);
+      for (x = Math.round(W * 0.04); x < W * 0.96; x++) {
         var pi = y * W + x;
         if (bgm[pi]) continue;
         var o2 = pi * 4, mx = Math.max(px[o2], px[o2 + 1], px[o2 + 2]), mn = Math.min(px[o2], px[o2 + 1], px[o2 + 2]);
-        tot++;
-        if (mx < 75 && mx - mn < 45) nd++; else if (mn > 185 && mx - mn < 40) nl++;
-        var body = bm[pi];
-        if (!body && enclosed(x, y)) off++;
-        var l0 = L(o2);
+        var body = bm[pi], l0 = L(o2);
         var eR = x + 1 < W && !bgm[pi + 1] && Math.abs(l0 - L(o2 + 4)) > 38;
         var eD = y < bot && !bgm[pi + W] && Math.abs(l0 - L(o2 + W * 4)) > 38;
-        if ((eR || eD) && enclosed(x, y)) edges++;
+        fg++;
+        // A second garment: flat fabric that is not the main shirt color, not skin, and not surrounded by the shirt.
+        if (!body && !eR && !eD && !skin(o2) && !enclosedR(x, y, Math.round(W * 0.45), Math.round(H * 0.4))) other++;
+        if (x >= il && x < ir) {
+          tot++;
+          if (mx < 75 && mx - mn < 45) nd++; else if (mn > 185 && mx - mn < 40) nl++;
+          if (!body && enclosed(x, y)) off++;
+          if ((eR || eD) && enclosed(x, y)) edges++;
+        } else if (y <= sleeveTo && x >= r.lo && x <= r.hi && (x < tlo || x > thi)) {
+          // Sleeve area: outside the torso columns, upper part of the shirt.
+          sTot++;
+          if ((!body || eR || eD) && enclosedR(x, y, Math.round(W * 0.1), Math.round(H * 0.08))) sPrint++;
+        }
       }
     }
     if (tot < 300) return null;
-    return { dark: nd / tot, light: nl / tot, print: Math.max(edges / tot, off / tot) };
+    return {
+      dark: nd / tot, light: nl / tot, print: Math.max(edges / tot, off / tot),
+      sleeve: sTot >= 80 ? sPrint / sTot : 0,
+      multiColor: bgInfo.share >= 0.15 && fg > 0 ? other / fg : 0
+    };
+  }
+  // Studio background = pixels like the image corners that connect to the border.
+  function bgMask(px, W, H) {
+    var bgm = new Uint8Array(W * H), cr = 0, cg = 0, cb = 0, cs = [[1, 1], [W - 2, 1], [1, H - 2], [W - 2, H - 2]];
+    cs.forEach(function (c) { var o = (c[1] * W + c[0]) * 4; cr += px[o]; cg += px[o + 1]; cb += px[o + 2]; });
+    cr /= 4; cg /= 4; cb /= 4;
+    function bgLike(i) { var o = i * 4, a = px[o] - cr, b2 = px[o + 1] - cg, c2 = px[o + 2] - cb; return a * a + b2 * b2 + c2 * c2 < 1600; }
+    var stack = [], n = 0, x, y;
+    for (x = 0; x < W; x++) { stack.push(x, (H - 1) * W + x); }
+    for (y = 0; y < H; y++) { stack.push(y * W, y * W + W - 1); }
+    while (stack.length) {
+      var i0 = stack.pop();
+      if (bgm[i0] || !bgLike(i0)) continue;
+      bgm[i0] = 1; n++;
+      var cx = i0 % W, cy = (i0 - cx) / W;
+      if (cx > 0) stack.push(i0 - 1); if (cx < W - 1) stack.push(i0 + 1);
+      if (cy > 0) stack.push(i0 - W); if (cy < H - 1) stack.push(i0 + W);
+    }
+    return { m: bgm, share: n / (W * H) };
+  }
+  // Stacked / fanned multipacks: the top outline of the clothing is a staircase of 3+ shoulder
+  // plateaus each lower (or higher) than the last. A single tee is shoulder-neck-shoulder, never a staircase.
+  function stackedShirts(px, W, H) {
+    var bg = bgMask(px, W, H);
+    if (bg.share < 0.15) return 0;
+    var raw = [], x, y;
+    for (x = 0; x < W; x++) { var t = -1; for (y = 0; y < H; y++) if (!bg.m[y * W + x]) { t = y; break; } raw.push(t); }
+    var topY = raw.map(function (v, i) {
+      var a = raw.slice(Math.max(0, i - 2), i + 3).filter(function (z) { return z >= 0; }).sort(function (m, n) { return m - n; });
+      return a.length ? a[a.length >> 1] : -1;
+    });
+    var plats = [], st = 0;
+    for (x = 1; x <= W; x++) {
+      if (x < W && topY[x] >= 0 && topY[st] >= 0 && Math.abs(topY[x] - topY[st]) <= H * 0.025) continue;
+      if (topY[st] >= 0 && x - st >= W * 0.06) {
+        var lv = 0; for (var k = st; k < x; k++) lv += topY[k];
+        lv /= (x - st);
+        var last = plats[plats.length - 1];
+        if (last && Math.abs(last - lv) < H * 0.03) plats[plats.length - 1] = (last + lv) / 2; else plats.push(lv);
+      }
+      st = x;
+    }
+    var best = 1, run = 1, dir = 0;
+    for (var i = 1; i < plats.length; i++) {
+      var d = plats[i] - plats[i - 1], sd = Math.abs(d) >= H * 0.05 ? (d > 0 ? 1 : -1) : 0;
+      if (sd && sd === dir) run++; else run = sd ? 2 : 1;
+      dir = sd; if (run > best) best = run;
+    }
+    return best;
   }
   var POP = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
   function bitsOf(h) { var c = 0; for (var i = 0; i < h.length; i++) c += POP[parseInt(h[i], 16)]; return c; }
@@ -902,13 +968,13 @@ const COLLECTOR_BODY = String.raw`
   }
   async function aiCheck(item) {
     var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件 T 恤的印花图案。商品标题：' + item.title +
-      '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件 T 恤本身，裤子和配饰的颜色、图案一律忽略。���返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满,"plain":是否纯色素面没有任何印花图案,"notColor":衣服主体是否不是' + colorName(item.ctx) + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
+      '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件 T 恤本身，裤子和配饰的颜色、图案一律忽略。���返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满（含满身波点、豹纹、星星等小碎花纹）,"multiple":主图里是否出现 2 件或以上衣服（多件装、叠放、多个模特穿不同衣服）,"sleevePrint":袖子或袖口上是否有印花/图案/字母,"plain":是否纯色素面没有任何印花图案,"notColor":衣服主体是否不是' + colorName(item.ctx) + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
     var content = cfg.aiVision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: item.imageUrl } }]
       : prompt;
     var r = await doubao(content);
     var bad = r.violation ? '违规内容' : r.ipRisk ? 'IP/品牌侵权风险' : null;
-    if (!bad && cfg.aiVision) bad = (cfg.noPlain && r.plain) ? '纯色无图案' : r.doubleSided ? '双面印花' : r.fullPrint ? '印花太满' : (cfg.blackOnly && (r.notColor || r.notBlack)) ? '不是' + colorName(item.ctx) : null;
+    if (!bad && cfg.aiVision) bad = (cfg.noPlain && r.plain) ? '纯色无图案' : r.multiple ? '多件衣服的主图' : r.sleevePrint ? '袖子有印花' : r.doubleSided ? '双面印花' : r.fullPrint ? '印花太满' : (cfg.blackOnly && (r.notColor || r.notBlack)) ? '不是' + colorName(item.ctx) : null;
     return bad ? bad + (r.reason ? '：' + r.reason : '') : null;
   }
 
@@ -1051,11 +1117,12 @@ const COLLECTOR_BODY = String.raw`
   var PLAIN_RE = /(^|[^a-z])(plain|solid|blank|basic|einfarbig|unifarben|uni|liso|lisa|tinta unita|semplice)([^a-z]|$)|纯色|纯白|纯黑|素色|素面|无图案|无印花|空白|光板|基础款|打底|無地|무지/i;
   var PRINT_RE = /graphic|print|pattern|design|logo|letter|slogan|druck|motif|imprim|estampad|stampa|印花|图案|圖案|字母|文字|プリント|프린트/i;
   // 2/3/6-packs of basic tees ("3 件装", "6-Pack", "Pack of 4", "Multipack") are almost always plain colors.
-  var MULTI_RE = /([2-9]|1\d)\s*(件装|件套|件入|枚組|枚セット|入り|장|-?\s*(pack|pk|pcs|pieces|piece|stück|stuck|pièces|pezzi|piezas|unidades|teile))(?![a-z])|(pack|set|lot)\s*(of|de|di|von)\s*([2-9]|1\d)(?!\d)|multi\s*-?\s*pack|value\s*pack|(\d+)\s*er[\s-]*(pack|set)/i;
+  var MULTI_RE = /([2-9]|1\d)\s*(件装|件套|件入|枚組|枚セット|入り|장|-?\s*(pack|pk|pcs|pieces|piece|stück|stuck|pièces|pezzi|piezas|unidades|teile))(?![a-z])|(pack|set|lot)\s*(of|de|di|von)\s*([2-9]|1\d)(?!\d)|multi\s*-?\s*pack|value\s*pack|variety\s*pack|assorted|combo\s*pack|(\d+)\s*er[\s-]*(pack|set)|[两二三四五六七八九十]\s*件(装|套|入)?|[2-9]\s*件|多件|组合装|[2-9]\s*(色|colou?rs?)\s*(装|pack|set)/i;
   function isPlainTitle(t) { t = String(t || ''); return (PLAIN_RE.test(t) || MULTI_RE.test(t)) && !PRINT_RE.test(t); }
   async function processItem(item) {
     var ctx = item.ctx;
     if (isKnown(item.key)) { stats.dup++; markCard(liveCard(item), 'warn', '已处理过，不重复采'); return false; }
+    if (cfg.noPlain && MULTI_RE.test(String(item.title || ''))) { markSkipped(item, '多件装主图（标题）'); return false; }
     if (cfg.noPlain && isPlainTitle(item.title)) { markSkipped(item, '纯色无图案（标题）'); return false; }
     var info = null;
     if (cfg.imgDedupe || cfg.noPlain || (cfg.blackOnly && cfg.pixelCheck)) {
@@ -1063,6 +1130,9 @@ const COLLECTOR_BODY = String.raw`
     }
     var twin = info && cfg.imgDedupe ? similarSynced(info.hash) : null;
     if (twin) { markDup(item, '图案和已同步的 ' + twin.k + ' 几乎一样'); return false; }
+    if (info && cfg.noPlain && info.stairs >= 3) { markSkipped(item, '多件衣服叠放的主图（' + info.stairs + ' 层）'); return false; }
+    if (info && cfg.noPlain && info.multiColor >= 0.22) { markSkipped(item, '多件不同颜色衣服的主图（另一件占 ' + Math.round(info.multiColor * 100) + '%）'); return false; }
+    if (info && cfg.noPlain && info.sleeve >= 0.06) { markSkipped(item, '袖子有印花（袖子印花占比 ' + (info.sleeve * 100).toFixed(1) + '%）'); return false; }
     if (info && cfg.noPlain && info.print < cfg.printMin / 100) {
       markSkipped(item, '纯色无图案（印花占比 ' + (info.print * 100).toFixed(1) + '%）'); return false;
     }
@@ -1689,26 +1759,43 @@ const COLLECTOR_BODY = String.raw`
     } catch (e) { log('关键词翻译失败，用原词搜索：' + e.message, true); }
     return out;
   }
-  // Each site can have its own keyword list; sites left empty fall back to the shared list.
-  function kwOwner(scope) { return scope && scope !== 'all' && cfg.sites[scope] ? cfg.sites[scope] : null; }
-  function getScopeKws(scope) { var o = kwOwner(scope); return o ? (o.kws || '') : cfg.myKeywords; }
+  // Every site has its own keyword list; a site left empty uses its built-in local-language keyword.
+  function kwOwner(scope) { return cfg.sites[scope] || cfg.sites[cfg.kwScope] || cfg.sites[SITES[0].id]; }
+  function getScopeKws(scope) { return kwOwner(scope).kws || ''; }
   function setScopeKws(scope, text) {
-    var o = kwOwner(scope), clean = splitKeywords(text).join('\n');
-    if (o) o.kws = clean; else cfg.myKeywords = clean;
+    kwOwner(scope).kws = splitKeywords(text).join('\n');
     save(); refreshKwBox();
   }
-  function siteKws(id) { var own = splitKeywords(cfg.sites[id].kws || ''); return own.length ? own : splitKeywords(cfg.myKeywords); }
+  function builtinKws(id) { var s = siteBy(id); return splitKeywords(s[cfg.gender] || s.men); }
+  function siteKws(id) { var own = splitKeywords(cfg.sites[id].kws || ''); return own.length ? own : builtinKws(id); }
   function refreshKwBox() {
     var box = typeof host !== 'undefined' && host ? $('myKeywords') : null;
     if (!box) return;
-    box.value = getScopeKws(cfg.kwScope);
-    var own = kwOwner(cfg.kwScope);
-    box.placeholder = own ? '留空 = 用「通用」那组关键词' : '每行一个关键词';
+    var s = siteBy(cfg.kwScope);
+    box.value = getScopeKws(s.id);
+    box.placeholder = '留空 = 自动用本站默认词：' + builtinKws(s.id).join(' / ');
     var info = $('kwScopeInfo');
     if (info) {
-      var mine = SITES.filter(function (s) { return splitKeywords(cfg.sites[s.id].kws).length; }).map(function (s) { return s.name; });
-      info.textContent = mine.length ? '有独立关键词的站点：' + mine.join('、') : '所有站点都在用「通用」关键词';
+      var mine = SITES.filter(function (x) { return splitKeywords(cfg.sites[x.id].kws).length; }).map(function (x) { return x.name; });
+      info.textContent = '本站搜索语言：' + s.lang + '（填中文/英文会自动翻译成' + s.lang + '）。已单独填词：' + (mine.length ? mine.join('、') : '无，全部用默认词');
     }
+  }
+  function fallbackTrans(k, s) { return /[\u4e00-\u9fff]/.test(k) && !/中文|日文/.test(s.lang) ? localZhToEn(k) : k; }
+  // Rewrites the current site's list in its local language, so you can see and edit what will be searched.
+  async function translateScope() {
+    var s = siteBy(cfg.kwScope), kws = siteKws(s.id);
+    var pairs = kws.filter(function (k) { return needsTrans(k, s); }).map(function (k) { return { kw: k, lang: s.lang }; });
+    if (!pairs.length) { log(siteLabel(s) + ' 的关键词已经是' + s.lang + '，不用翻译'); return; }
+    var tr = await translateMany(pairs);
+    var out = kws.map(function (k) { return needsTrans(k, s) ? (tr[s.lang + '|' + k] || fallbackTrans(k, s)) : k; });
+    setScopeKws(s.id, out.join('\n'));
+    log(siteLabel(s) + ' 关键词已翻译成' + s.lang + '：' + out.slice(0, 4).join(' / ') + (out.length > 4 ? ' …' : ''));
+  }
+  function copyScopeToOthers() {
+    var s = siteBy(cfg.kwScope), kws = siteKws(s.id), n = 0;
+    SITES.forEach(function (x) { if (x.id !== s.id && cfg.sites[x.id].on) { cfg.sites[x.id].kws = kws.join('\n'); n++; } });
+    save(); refreshKwBox();
+    log(n ? '已把「' + siteLabel(s) + '」的 ' + kws.length + ' 个关键词复制到 ' + n + ' 个已勾选站点，搜索时会各自翻译成当地语言' : '没有其他已勾选的站点', !n);
   }
   async function buildTasks() {
     var on = SITES.filter(function (s) { return cfg.sites[s.id].on && siteKws(s.id).length; });
@@ -1727,7 +1814,7 @@ const COLLECTOR_BODY = String.raw`
       colors.forEach(function (c) {
         var seen = [];
         srcOf[s.id][c].forEach(function (k) {
-          var kk = needsTrans(k, s) ? (tr[s.lang + '|' + k] || (s.lang === '英文' ? localZhToEn(k) : k)) : k;
+          var kk = needsTrans(k, s) ? (tr[s.lang + '|' + k] || fallbackTrans(k, s)) : k;
           if (seen.indexOf(kk.toLowerCase()) >= 0) return;
           seen.push(kk.toLowerCase());
           tasks.push({ type: 'search', site: s.id, keyword: kk, src: k, color: c });
@@ -1849,13 +1936,13 @@ const COLLECTOR_BODY = String.raw`
   function pause() { running = false; var j = getJob(); if (j) { j.paused = true; setJob(j); } render(); }
 
   async function genKeywords() {
-    var men = cfg.gender === 'men', scope = cfg.kwScope, have = splitKeywords(getScopeKws(scope));
-    log('正在让豆包想更多英文关键词…');
-    var r = await doubao('我做跨境电商，要��索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。我已有这些关键词：' + have.join('；') +
-      '。请再给 5 个美国买家真实会搜的英文关键词，彼此说法不同，都要表达「黑色 + 印花/图案 + 短袖 T 恤 + ' + (men ? '男' : '女') + '」，必须带具体图案主题，不要纯色/素色/plain/solid/blank，不要品牌、IP、长袖、卫衣、儿童。只返回 JSON：{"keywords":["..."]}');
+    var men = cfg.gender === 'men', scope = cfg.kwScope, site = siteBy(scope), have = siteKws(scope);
+    log('正在让豆包为 ' + siteLabel(site) + ' 想更多' + site.lang + '关键词…');
+    var r = await doubao('我做跨境电商，在 ' + siteLabel(site) + ' 上要��索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。我已有这些关键词：' + have.join('；') +
+      '。请再给 5 个该站点当地买家真实会在搜索框输入的' + site.lang + '关键词，彼此说法不同，都要表达「黑色 + 印花/图案 + 短袖 T 恤 + ' + (men ? '男' : '女') + '」，必须带具体图案主题，不要纯色/素色/plain/solid/blank，不要品牌、IP、长袖、卫衣、儿童。只返回 JSON：{"keywords":["..."]}');
     var list = splitKeywords(have.concat(r.keywords || []).join('\n'));
     setScopeKws(scope, list.join('\n'));
-    log('关键词共 ' + list.length + ' 个，外语站点会自动翻译后搜索');
+    log(siteLabel(site) + ' 关键词共 ' + list.length + ' 个');
   }
   // ---------- random black / white tee keywords: built locally (free), never repeats across runs ----------
   var KW_PARTS = {
@@ -1903,7 +1990,7 @@ const COLLECTOR_BODY = String.raw`
     GM_setValue('kwHistory', hist.slice(-20000));
     return out;
   }
-  function scopeName(scope) { var s = SITES.find(function (x) { return x.id === scope; }); return s ? siteLabel(s) : '通用'; }
+  function scopeName(scope) { return siteLabel(siteBy(scope)); }
   function addRandomKeywords(n, scope) {
     var prev = cfg.kwScope;
     if (scope) cfg.kwScope = scope;
@@ -2030,12 +2117,13 @@ const COLLECTOR_BODY = String.raw`
           hint('Etsy / Amazon 卡片不显示销量，用评价数代替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。') +
         '</div>' +
         '<div data-pane="country" style="display:none">' +
-          field('编辑哪个站点的关键词', '<select data-k="kwScope" style="' + inputCss + '"><option value="all">通用（没单独填的站点都用这组）</option>' +
+          field('编辑哪个站点的关键词（每个站点独立）', '<select data-k="kwScope" style="' + inputCss + '">' +
             SITES.map(function (s) { return '<option value="' + s.id + '">' + siteLabel(s) + ' · ' + s.lang + '</option>'; }).join('') + '</select>') +
-          field('关键词（每行一个，依次轮询搜索）', '<textarea data-k="myKeywords" rows="4" style="' + inputCss + ';resize:vertical"></textarea>') +
+          field('本站关键词（每行一个，依次轮询搜索）', '<textarea data-k="myKeywords" rows="4" style="' + inputCss + ';resize:vertical"></textarea>') +
           '<div data-k="kwScopeInfo" style="font-size:11px;color:' + C.dim + ';margin:-4px 0 8px"></div>' +
-          check('kwTranslate', '选了其他国家时，自动把关键词翻译成该国语言再��索（用豆包）') +
+          check('kwTranslate', '搜索前自动把关键词翻译成该站点当地语言再��索（用豆包）') +
           '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="genKw" style="' + btnCss + '">豆包帮我想更多词</button><button data-k="previewKw" style="' + btnCss + '">预览各站搜索词</button></div>' +
+          '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="transKw" style="' + btnCss + '">翻译成本站语言</button><button data-k="copyKw" style="' + btnCss + '">复制到其他已选站点</button></div>' +
           '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
             '<select data-k="kwRandColor" style="' + inputCss + ';flex:1"><option value="both">黑白各半</option><option value="black">只要黑 T</option><option value="white">只要白 T</option></select>' +
             '<input data-k="kwRandCount" type="number" min="1" max="100" style="' + inputCss + ';width:64px" aria-label="生成个数">' +
@@ -2160,12 +2248,14 @@ const COLLECTOR_BODY = String.raw`
   });
   $('noneAll').onclick = function () { setPlatform(null, false); log('已取消全部站点'); };
   syncSites();
-  if (cfg.kwScope !== 'all' && !cfg.sites[cfg.kwScope]) cfg.kwScope = 'all';
+  if (!cfg.sites[cfg.kwScope]) cfg.kwScope = SITES[0].id;
   $('kwScope').value = cfg.kwScope;
   $('kwScope').onchange = function () { cfg.kwScope = $('kwScope').value; save(); refreshKwBox(); };
   $('myKeywords').onchange = function () { setScopeKws(cfg.kwScope, $('myKeywords').value); };
   refreshKwBox();
   $('previewKw').onclick = function () { previewKeywords().catch(function (e) { log(e.message, true); }); };
+  $('transKw').onclick = function () { translateScope().catch(function (e) { log(e.message, true); }); };
+  $('copyKw').onclick = copyScopeToOthers;
 
   ['arkKey', 'arkModel', 'skipWords', 'removeWords', 'handoff', 'schedule', 'reportTime', 'pushType', 'pushKey', 'colorMode'].forEach(function (k) {
     $(k).value = cfg[k];
@@ -2207,7 +2297,8 @@ const COLLECTOR_BODY = String.raw`
   $('gender').onchange = function () {
     var prev = cfg.gender;
     cfg.gender = $('gender').value;
-    if (cfg.myKeywords === SITES[0][prev]) { cfg.myKeywords = SITES[0][cfg.gender]; refreshKwBox(); }
+    SITES.forEach(function (x) { var o = cfg.sites[x.id]; if (o.kws === x[prev]) o.kws = x[cfg.gender]; });
+    refreshKwBox();
     save();
   };
   $('resetWords').onclick = function () {
@@ -2333,11 +2424,10 @@ const COLLECTOR_BODY = String.raw`
     if (!preflight()) return;
     if (capReached()) { log('今日已达每日上限 ' + cfg.dailyCap + '，到「自动」里调高或改成 0', true); return; }
     if (cfg.kwAutoRand) {
-      addRandomKeywords(0, 'all');
-      SITES.forEach(function (s) { if (cfg.sites[s.id].on && splitKeywords(cfg.sites[s.id].kws).length) addRandomKeywords(0, s.id); });
+      SITES.forEach(function (s) { if (cfg.sites[s.id].on) addRandomKeywords(0, s.id); });
       kwHistInfo();
     }
-    if (!SITES.some(function (s) { return cfg.sites[s.id].on && siteKws(s.id).length; })) { showTab('country'); log('请先在「站点」里填写关键词（通用或勾选站点自己的）', true); return; }
+    if (!SITES.some(function (s) { return cfg.sites[s.id].on && siteKws(s.id).length; })) { showTab('country'); log('请先在「站点」里勾选站点并填写关键词', true); return; }
     starting = true; render();
     try {
       var tasks = withUserFirst(await buildTasks());
@@ -2424,7 +2514,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.23.0',
+    '// @version      6.24.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
