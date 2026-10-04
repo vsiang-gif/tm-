@@ -214,7 +214,7 @@ const COLLECTOR_BODY = String.raw`
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
   var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]/i;
-  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
+  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|tr��ng|putih|branc[ao]/i;
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
     ['nera', 'bianca'], ['nero', 'bianco'], ['pretas', 'brancas'], ['pretos', 'brancos'], ['preta', 'branca'], ['preto', 'branco'],
@@ -1041,7 +1041,7 @@ const COLLECTOR_BODY = String.raw`
     var s = dayStats(d);
     return ['日期：' + d,
       '已采集并同步：' + s.saved + ' 张' + (cfg.dailyCap ? '（每日上限 ' + cfg.dailyCap + '）' : ''),
-      '去重拦截（没花灵豆）：' + s.dup + ' 张',
+      '去重拦截（没���灵豆）：' + s.dup + ' 张',
       '审核跳过：' + s.skipped + ' 张',
       '失���：' + s.failed,
       '各站点：' + joinMap(s.sites),
@@ -1206,6 +1206,12 @@ const COLLECTOR_BODY = String.raw`
   function scan(ctx) {
     var all = extract(ctx.optional), fresh = 0;
     stats.found = Math.max(stats.found, all.length);
+    if (!all.length && PKEY === 'etsy' && !ctx.diagLogged && document.readyState === 'complete') {
+      ctx.diagLogged = true;
+      var listingLinks = document.querySelectorAll('a[href*="/listing/"]').length;
+      var etsyImgs = document.querySelectorAll('img[src*="etsystatic.com"], img[srcset*="etsystatic.com"]').length;
+      log('Etsy 诊断：页面上商品链接 ' + listingLinks + ' 个、商品图 ' + etsyImgs + ' 张、地址 ' + location.pathname + location.search.slice(0, 60) + '。若都是 0，说明页面不是搜索结果页；若不是 0 但识别为 0，请把这行日志截图发我', true);
+    }
     all.forEach(function (x) {
       if (ctx.seen.has(x.goodsId)) return;
       ctx.seen.add(x.goodsId);
@@ -1239,7 +1245,8 @@ const COLLECTOR_BODY = String.raw`
   function visible(el) { return el.offsetParent !== null && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; }
   function findMore() {
     // Amazon has no "load more" button; its "See more" links are sidebar filters. It pages with「下一页」instead.
-    if (isAmazon()) return null;
+    // Etsy also pages with arrows; its "Show more"/"See more" are filter and footer links that navigate away.
+    if (isAmazon() || PKEY === 'etsy') return null;
     var els = document.querySelectorAll('button, [role="button"], a, div, span');
     var best = null, bestBottom = -Infinity;
     for (var i = 0; i < els.length; i++) {
@@ -1393,6 +1400,16 @@ const COLLECTOR_BODY = String.raw`
     return ok;
   }
   async function clickNext(el) {
+    // Etsy's DataDome flags script-generated mouse events (isTrusted=false); a plain navigation looks like a person opening the link.
+    if (PKEY === 'etsy') {
+      var raw = el.tagName === 'A' ? el.getAttribute('href') : '';
+      var next = new URL(raw && !/^(#|javascript:)/i.test(raw) ? raw : location.href, location.href);
+      if (pageParam(next.href) <= (pageParam(location.href) || 1)) next.searchParams.set('page', String((pageParam(location.href) || 1) + 1));
+      await sleep(2000 + Math.random() * 2000);
+      location.href = next.href;
+      await sleep(8000);
+      return;
+    }
     try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
     await sleep(900 + Math.random() * 900);
     var href = el.tagName === 'A' ? el.getAttribute('href') : '';
@@ -1452,7 +1469,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.27.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.28.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -2616,7 +2633,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.27.0',
+    '// @version      6.28.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
