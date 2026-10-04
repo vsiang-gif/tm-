@@ -214,7 +214,7 @@ const COLLECTOR_BODY = String.raw`
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
   var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]/i;
-  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|tr��ng|putih|branc[ao]/i;
+  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|tr���ng|putih|branc[ao]/i;
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
     ['nera', 'bianca'], ['nero', 'bianco'], ['pretas', 'brancas'], ['pretos', 'brancos'], ['preta', 'branca'], ['preto', 'branco'],
@@ -260,7 +260,18 @@ const COLLECTOR_BODY = String.raw`
     cfg.kwPerSite = 1;
     GM_setValue('cfg', cfg);
   }
-  if (!cfg.sites[cfg.kwScope]) cfg.kwScope = (SITES.find(function (s) { return cfg.sites[s.id].on; }) || SITES[0]).id;
+  // v6.30: one keyword list per platform (Temu / SHEIN ...); each country site translates it at search time.
+  if (!cfg.platKws) {
+    cfg.platKws = {};
+    SITES.forEach(function (s) {
+      if (splitKeywords(cfg.platKws[s.p] || '').length) return;
+      var own = splitKeywords(cfg.sites[s.id].kws || '');
+      if (own.length) cfg.platKws[s.p] = own.join('\n');
+    });
+    GM_setValue('cfg', cfg);
+  }
+  if (cfg.sites[cfg.kwScope]) cfg.kwScope = siteBy(cfg.kwScope).p;
+  if (!PNAMES[cfg.kwScope]) cfg.kwScope = (SITES.find(function (s) { return cfg.sites[s.id].on; }) || SITES[0]).p;
   var done = new Set(GM_getValue('done', []));
   var records = GM_getValue('records', []);
   // synced = actually sent to 灵图 (costs 灵豆) and must never be sent again; done also includes reviewed-and-skipped items.
@@ -1307,7 +1318,7 @@ const COLLECTOR_BODY = String.raw`
         }
         retryClicks++;
         var cool = retryClicks === 1 ? 2500 + Math.random() * 2000 : 12000 + Math.random() * 8000;
-        log('出现「' + label + '」，等 ' + Math.round(cool / 1000) + ' 秒后第 ' + retryClicks + ' 次模拟人工点击');
+        log('出现「' + label + '」，等 ' + Math.round(cool / 1000) + ' 秒后第 ' + retryClicks + ' 次模��人工点击');
         await sleep(cool);
         if (retryClicks >= 2) {
           try { scrollBy({ top: -(300 + Math.random() * 500), behavior: 'smooth' }); } catch (e) {}
@@ -1469,7 +1480,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.29.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.30.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -1729,7 +1740,7 @@ const COLLECTOR_BODY = String.raw`
       if (!running) { job.paused = true; setJob(job); render(); return; }
       job.idx++; setJob(job); render();
     }
-    finishJob('全部任务完成');
+    finishJob('全部��务完成');
   }
   function finishJob(reason) {
     setJob(null); running = false; queue.length = 0;
@@ -1835,42 +1846,39 @@ const COLLECTOR_BODY = String.raw`
     return out;
   }
   // Every site has its own keyword list; a site left empty uses its built-in local-language keyword.
-  function kwOwner(scope) { return cfg.sites[scope] || cfg.sites[cfg.kwScope] || cfg.sites[SITES[0].id]; }
-  function getScopeKws(scope) { return kwOwner(scope).kws || ''; }
+  // Keywords belong to a platform (Temu, SHEIN …); scope may be a platform key or a site id.
+  function platOf(scope) { return PNAMES[scope] ? scope : siteBy(scope).p; }
+  function platSites(p) { return SITES.filter(function (s) { return s.p === p; }); }
+  function platList() { return Object.keys(PNAMES).filter(function (p) { return platSites(p).length; }); }
+  function getScopeKws(scope) { return cfg.platKws[platOf(scope)] || ''; }
   function setScopeKws(scope, text) {
-    kwOwner(scope).kws = splitKeywords(text).join('\n');
+    cfg.platKws[platOf(scope)] = splitKeywords(text).join('\n');
     save(); refreshKwBox();
   }
-  function builtinKws(id) { var s = siteBy(id); return splitKeywords(s[cfg.gender] || s.men); }
-  function siteKws(id) { var own = splitKeywords(cfg.sites[id].kws || ''); return own.length ? own : builtinKws(id); }
+  function builtinKws(id) { var s = PNAMES[id] ? platSites(id)[0] : siteBy(id); return splitKeywords(s[cfg.gender] || s.men); }
+  function siteKws(id) { var own = splitKeywords(getScopeKws(id)); return own.length ? own : builtinKws(id); }
   function refreshKwBox() {
     var box = typeof host !== 'undefined' && host ? $('myKeywords') : null;
     if (!box) return;
-    var s = siteBy(cfg.kwScope);
-    box.value = getScopeKws(s.id);
-    box.placeholder = '留空 = 自动用本站默认词：' + builtinKws(s.id).join(' / ');
+    var p = platOf(cfg.kwScope);
+    box.value = getScopeKws(p);
+    box.placeholder = '留空 = 自动用' + PNAMES[p] + '各国站点的当地默认词，例如：' + builtinKws(p).join(' / ');
     var info = $('kwScopeInfo');
     if (info) {
-      var mine = SITES.filter(function (x) { return splitKeywords(cfg.sites[x.id].kws).length; }).map(function (x) { return x.name; });
-      info.textContent = '本站搜索语言：' + s.lang + '（填中文/英文会自动翻译成' + s.lang + '）。已单独填词：' + (mine.length ? mine.join('、') : '无，全部用默认词');
+      var langs = {};
+      platSites(p).filter(function (s) { return cfg.sites[s.id].on; }).forEach(function (s) { (langs[s.lang] = langs[s.lang] || []).push(s.name); });
+      var parts = Object.keys(langs).map(function (l) { return l + '（' + langs[l].join('、') + '）'; });
+      info.textContent = PNAMES[p] + ' 所有国家共用这一份关键词，搜索时自动翻译成当地语言。' + (parts.length ? '已选站点：' + parts.join('；') : '还没勾选 ' + PNAMES[p] + ' 的站点');
     }
   }
   function fallbackTrans(k, s) { return /[\u4e00-\u9fff]/.test(k) && !/中文|日文/.test(s.lang) ? localZhToEn(k) : k; }
-  // Rewrites the current site's list in its local language, so you can see and edit what will be searched.
-  async function translateScope() {
-    var s = siteBy(cfg.kwScope), kws = siteKws(s.id);
-    var pairs = kws.filter(function (k) { return needsTrans(k, s); }).map(function (k) { return { kw: k, lang: s.lang }; });
-    if (!pairs.length) { log(siteLabel(s) + ' 的关键词已经是' + s.lang + '，不用翻译'); return; }
-    var tr = await translateMany(pairs);
-    var out = kws.map(function (k) { return needsTrans(k, s) ? (tr[s.lang + '|' + k] || fallbackTrans(k, s)) : k; });
-    setScopeKws(s.id, out.join('\n'));
-    log(siteLabel(s) + ' 关键词已翻译成' + s.lang + '：' + out.slice(0, 4).join(' / ') + (out.length > 4 ? ' …' : ''));
-  }
   function copyScopeToOthers() {
-    var s = siteBy(cfg.kwScope), kws = siteKws(s.id), n = 0;
-    SITES.forEach(function (x) { if (x.id !== s.id && cfg.sites[x.id].on) { cfg.sites[x.id].kws = kws.join('\n'); n++; } });
+    var p = platOf(cfg.kwScope), kws = siteKws(p), n = 0;
+    platList().forEach(function (x) {
+      if (x !== p && platSites(x).some(function (s) { return cfg.sites[s.id].on; })) { cfg.platKws[x] = kws.join('\n'); n++; }
+    });
     save(); refreshKwBox();
-    log(n ? '已把「' + siteLabel(s) + '」的 ' + kws.length + ' 个关键词复制到 ' + n + ' 个已勾选站点，搜索时会各自翻译成当地语言' : '没有其他已勾选的站点', !n);
+    log(n ? '已把「' + PNAMES[p] + '」的 ' + kws.length + ' 个关键词复制到 ' + n + ' 个已勾选站点的网站，搜索时各国自动翻译' : '没有其他已勾选站点的网站', !n);
   }
   async function buildTasks(only) {
     var on = SITES.filter(function (s) { return (only ? only.indexOf(s.id) >= 0 : cfg.sites[s.id].on) && siteKws(s.id).length; });
@@ -2011,13 +2019,13 @@ const COLLECTOR_BODY = String.raw`
   function pause() { running = false; var j = getJob(); if (j) { j.paused = true; setJob(j); } render(); }
 
   async function genKeywords() {
-    var men = cfg.gender === 'men', scope = cfg.kwScope, site = siteBy(scope), have = siteKws(scope);
-    log('正在让豆包为 ' + siteLabel(site) + ' 想更多' + site.lang + '关键词…');
-    var r = await doubao('我做跨境电商，在 ' + siteLabel(site) + ' 上要搜索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。我已有这些关键词：' + have.join('；') +
-      '。请再给 5 个该站点当地买家真实会在搜索框输入的' + site.lang + '关键词，彼此说法不同，都要表达「黑色 + 印花/图案 + 短袖 T 恤 + ' + (men ? '男' : '女') + '」，必须带具体图案主题，不要纯色/素色/plain/solid/blank，不要品牌、IP、长袖、卫衣、儿童。只返回 JSON：{"keywords":["..."]}');
+    var men = cfg.gender === 'men', scope = platOf(cfg.kwScope), pname = PNAMES[scope], have = siteKws(scope);
+    log('正在让豆包为 ' + pname + ' 想更多关键词（搜索时会自动翻译成各国语言）…');
+    var r = await doubao('我做跨境电商，在 ' + pname + ' 上要搜索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。我已有这些关键词：' + have.join('；') +
+      '。请再给 5 个买家真实会在搜索框输入的英文关键词，彼此说法不同，都要表达「黑色 + 印花/图案 + 短袖 T 恤 + ' + (men ? '男' : '女') + '」，必须带具体图案主题，不要纯色/素色/plain/solid/blank，不要品牌、IP、长袖、卫衣、儿童。只返回 JSON：{"keywords":["..."]}');
     var list = splitKeywords(have.concat(r.keywords || []).join('\n'));
     setScopeKws(scope, list.join('\n'));
-    log(siteLabel(site) + ' 关键词共 ' + list.length + ' 个');
+    log(pname + ' 关键词共 ' + list.length + ' 个');
   }
   // ---------- random black / white tee keywords: built locally (free), never repeats across runs ----------
   var KW_PARTS = {
@@ -2065,7 +2073,7 @@ const COLLECTOR_BODY = String.raw`
     GM_setValue('kwHistory', hist.slice(-20000));
     return out;
   }
-  function scopeName(scope) { return siteLabel(siteBy(scope)); }
+  function scopeName(scope) { return PNAMES[platOf(scope)]; }
   function addRandomKeywords(n, scope) {
     var prev = cfg.kwScope;
     if (scope) cfg.kwScope = scope;
@@ -2172,7 +2180,7 @@ const COLLECTOR_BODY = String.raw`
   var host = document.createElement('div');
   host.setAttribute('style', 'position:fixed;right:20px;bottom:20px;z-index:2147483647;width:350px;background:' + C.bg + ';color:' + C.text + ';font:13px/1.5 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.4);padding:14px');
   host.innerHTML = safeHTML(
-    '<div data-k="drag" title="按住这里拖动面板" style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:-14px -14px 8px;padding:10px 14px 6px;cursor:move;user-select:none;touch-action:none">' +
+    '<div data-k="drag" title="按住面板任意空白处都能拖动（双击标题栏恢复位置）" style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:-14px -14px 8px;padding:10px 14px 6px;cursor:move;user-select:none;touch-action:none">' +
       '<strong style="font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">爆款图案采集 → 灵图 · ' + PNAMES[PKEY] + ' <span style="color:' + C.dim + ';font-weight:400;font-size:12px">v' + SCRIPT_VERSION + '</span></strong>' +
       '<span style="display:flex;align-items:center;gap:6px;flex-shrink:0">' +
         '<button data-k="reload" title="装了新版本后点这里刷新页面，让新版本生效" style="background:' + C.green + ';border:0;color:#111;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;font-weight:600">刷新版本</button>' +
@@ -2196,13 +2204,13 @@ const COLLECTOR_BODY = String.raw`
           hint('Etsy / Amazon 卡片不显示销量，用评价数代替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。') +
         '</div>' +
         '<div data-pane="country" style="display:none">' +
-          field('编辑哪个站点的关键词（每个站点独立）', '<select data-k="kwScope" style="' + inputCss + '">' +
-            SITES.map(function (s) { return '<option value="' + s.id + '">' + siteLabel(s) + ' · ' + s.lang + '</option>'; }).join('') + '</select>') +
-          field('本站关键词（每行一个，依次轮询搜索）', '<textarea data-k="myKeywords" rows="4" style="' + inputCss + ';resize:vertical"></textarea>') +
+          field('编辑哪个网站的关键词（各国站点共用，自动翻译）', '<select data-k="kwScope" style="' + inputCss + '">' +
+            platList().map(function (p) { return '<option value="' + p + '">' + PNAMES[p] + '</option>'; }).join('') + '</select>') +
+          field('该网站关键词（每行一个，依次轮询搜索）', '<textarea data-k="myKeywords" rows="4" style="' + inputCss + ';resize:vertical"></textarea>') +
           '<div data-k="kwScopeInfo" style="font-size:11px;color:' + C.dim + ';margin:-4px 0 8px"></div>' +
           check('kwTranslate', '搜索前自动把关键词翻译成该站点当地语言再搜索（用豆包）') +
           '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="genKw" style="' + btnCss + '">豆包帮我想更多词</button><button data-k="previewKw" style="' + btnCss + '">预览各站搜索词</button></div>' +
-          '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="transKw" style="' + btnCss + '">翻译成本站语言</button><button data-k="copyKw" style="' + btnCss + '">复制到其他已选站点</button></div>' +
+          '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="copyKw" style="' + btnCss + '">复制到其他网站</button></div>' +
           '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
             '<select data-k="kwRandColor" style="' + inputCss + ';flex:1"><option value="both">黑白各半</option><option value="black">只要黑 T</option><option value="white">只要白 T</option></select>' +
             '<input data-k="kwRandCount" type="number" min="1" max="100" style="' + inputCss + ';width:64px" aria-label="生成个数">' +
@@ -2334,13 +2342,12 @@ const COLLECTOR_BODY = String.raw`
   });
   $('noneAll').onclick = function () { setPlatform(null, false); log('已取消全部站点'); };
   syncSites();
-  if (!cfg.sites[cfg.kwScope]) cfg.kwScope = SITES[0].id;
+  cfg.kwScope = platOf(cfg.kwScope);
   $('kwScope').value = cfg.kwScope;
   $('kwScope').onchange = function () { cfg.kwScope = $('kwScope').value; save(); refreshKwBox(); };
   $('myKeywords').onchange = function () { setScopeKws(cfg.kwScope, $('myKeywords').value); };
   refreshKwBox();
   $('previewKw').onclick = function () { previewKeywords().catch(function (e) { log(e.message, true); }); };
-  $('transKw').onclick = function () { translateScope().catch(function (e) { log(e.message, true); }); };
   $('copyKw').onclick = copyScopeToOthers;
 
   ['arkKey', 'arkModel', 'skipWords', 'removeWords', 'handoff', 'schedule', 'reportTime', 'pushType', 'pushKey', 'colorMode'].forEach(function (k) {
@@ -2383,7 +2390,10 @@ const COLLECTOR_BODY = String.raw`
   $('gender').onchange = function () {
     var prev = cfg.gender;
     cfg.gender = $('gender').value;
-    SITES.forEach(function (x) { var o = cfg.sites[x.id]; if (o.kws === x[prev]) o.kws = x[cfg.gender]; });
+    platList().forEach(function (p) {
+      var f = platSites(p)[0];
+      if (cfg.platKws[p] && cfg.platKws[p] === splitKeywords(f[prev]).join('\n')) cfg.platKws[p] = splitKeywords(f[cfg.gender]).join('\n');
+    });
     refreshKwBox();
     save();
   };
@@ -2410,23 +2420,40 @@ const COLLECTOR_BODY = String.raw`
     }
     var saved = GM_getValue('panelPos', null);
     if (saved) clampPos(saved.right, saved.bottom);
-    bar.addEventListener('pointerdown', function (e) {
-      if (e.button !== 0 || e.target.closest('button')) return;
-      e.preventDefault();
+    // Any blank spot of the panel starts a drag; controls, text fields and scrollbars keep working normally.
+    var INTERACTIVE = 'button,input,textarea,select,option,label,a,summary,[contenteditable],[data-k="resize"]';
+    function onScrollbar(e) {
+      for (var el = e.target; el && el !== host.parentNode; el = el.parentElement) {
+        if (el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY)) {
+          var rr = el.getBoundingClientRect();
+          if (e.clientX > rr.left + el.clientWidth) return true;
+        }
+        if (el === host) break;
+      }
+      return false;
+    }
+    host.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || e.target.closest(INTERACTIVE) || onScrollbar(e)) return;
       var r = host.getBoundingClientRect();
-      var sx = e.clientX, sy = e.clientY, right0 = window.innerWidth - r.right, bottom0 = window.innerHeight - r.bottom, moved = false;
-      try { bar.setPointerCapture(e.pointerId); } catch (err) {}
-      function move(ev) { moved = true; clampPos(right0 - (ev.clientX - sx), bottom0 - (ev.clientY - sy)); }
+      var sx = e.clientX, sy = e.clientY, right0 = window.innerWidth - r.right, bottom0 = window.innerHeight - r.bottom, moved = false, pid = e.pointerId;
+      function move(ev) {
+        if (!moved && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 4) return;
+        if (!moved) { moved = true; try { host.setPointerCapture(pid); } catch (err) {} host.style.cursor = 'move'; }
+        ev.preventDefault();
+        clampPos(right0 - (ev.clientX - sx), bottom0 - (ev.clientY - sy));
+      }
       function up() {
-        bar.removeEventListener('pointermove', move);
-        bar.removeEventListener('pointerup', up);
-        bar.removeEventListener('pointercancel', up);
+        host.removeEventListener('pointermove', move);
+        host.removeEventListener('pointerup', up);
+        host.removeEventListener('pointercancel', up);
+        host.style.cursor = '';
         if (moved) GM_setValue('panelPos', { right: parseFloat(host.style.right) || 0, bottom: parseFloat(host.style.bottom) || 0 });
       }
-      bar.addEventListener('pointermove', move);
-      bar.addEventListener('pointerup', up);
-      bar.addEventListener('pointercancel', up);
+      host.addEventListener('pointermove', move);
+      host.addEventListener('pointerup', up);
+      host.addEventListener('pointercancel', up);
     });
+    host.addEventListener('selectstart', function (e) { if (host.style.cursor === 'move') e.preventDefault(); });
     bar.addEventListener('dblclick', function (e) {
       if (e.target.closest('button')) return;
       GM_setValue('panelPos', null);
@@ -2552,7 +2579,7 @@ const COLLECTOR_BODY = String.raw`
     if (!preflight()) return;
     if (capReached()) { log('今日已达每日上限 ' + cfg.dailyCap + '，到「自动」里调高或改成 0', true); return; }
     if (cfg.kwAutoRand) {
-      SITES.forEach(function (s) { if (cfg.sites[s.id].on) addRandomKeywords(0, s.id); });
+      platList().forEach(function (p) { if (platSites(p).some(function (s) { return cfg.sites[s.id].on; })) addRandomKeywords(0, p); });
       kwHistInfo();
     }
     if (!SITES.some(function (s) { return cfg.sites[s.id].on && siteKws(s.id).length; })) { showTab('country'); log('请先在「站点」里勾选站点并填写关键词', true); return; }
@@ -2573,7 +2600,7 @@ const COLLECTOR_BODY = String.raw`
     }
     if (!preflight()) return;
     if (capReached()) { log('今日已达每日上限 ' + cfg.dailyCap + '，到「自动」里调高或改成 0', true); return; }
-    if (cfg.kwAutoRand) ids.forEach(function (id) { addRandomKeywords(0, id); });
+    if (cfg.kwAutoRand) ids.map(platOf).filter(function (p, i, a) { return a.indexOf(p) === i; }).forEach(function (p) { addRandomKeywords(0, p); });
     starting = true; render();
     try {
       var tasks = await buildTasks(ids);
@@ -2661,7 +2688,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.29.0',
+    '// @version      6.30.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
