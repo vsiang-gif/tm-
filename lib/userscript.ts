@@ -1040,7 +1040,7 @@ const COLLECTOR_BODY = String.raw`
     var s = dayStats(d);
     return ['日期：' + d,
       '已采集并同步：' + s.saved + ' 张' + (cfg.dailyCap ? '（每日上限 ' + cfg.dailyCap + '）' : ''),
-      '去重拦截（没花灵豆）：' + s.dup + ' 张',
+      '去重拦截（没花灵���）：' + s.dup + ' 张',
       '审核跳过：' + s.skipped + ' 张',
       '失败：' + s.failed,
       '各站点：' + joinMap(s.sites),
@@ -1322,23 +1322,54 @@ const COLLECTOR_BODY = String.raw`
   }
   function isAmazon() { return /(^|\.)amazon\./i.test(location.hostname); }
   var NEXT_TEXT_RE = /^(下一页|下一頁|Next|Weiter|Suivant|Siguiente|Successivo|Próximo|Seguinte|次へ)\s*[›>»]?$/i;
+  var NEXT_LABEL_RE = /^(next( page| results)?|go to next page|下一页|下一頁|下一页结果|nächste seite|weiter|page suivante|suivant|página siguiente|siguiente|pagina successiva|successiva|próxima página|próxima|次のページ|次へ)\s*[→›>»]?$/i;
   function findNext() {
     var els = document.querySelectorAll(NEXT_SEL);
     for (var i = 0; i < els.length; i++) {
       if (host && host.contains(els[i])) continue;
       if (visible(els[i]) && !/disabled/i.test(els[i].className || '')) return els[i];
     }
-    // Text fallback, e.g. Amazon's「下一页 ›」in the bottom pagination bar.
+    // Text / label fallback: Amazon's「下一页 ›」, Etsy's arrow-only「→」(its name lives in aria-label or screen-reader text).
     var cands = document.querySelectorAll('a, button, [role="button"], [role="link"]');
     for (var j = 0; j < cands.length; j++) {
       var el = cands[j];
       if (host && host.contains(el)) continue;
-      var t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-      if (!t || t.length > 12 || !NEXT_TEXT_RE.test(t)) continue;
-      if (/disabled/i.test(el.className || '') || el.getAttribute('aria-disabled') === 'true') continue;
-      if (visible(el)) return el;
+      if (/disabled/i.test(el.className || '') || el.getAttribute('aria-disabled') === 'true' || el.disabled) continue;
+      var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      var label = (el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+      var inPager = !!el.closest('nav, [role="navigation"], [class*="pagination" i], [class*="pager" i]');
+      var ok = (t && t.length <= 24 && (NEXT_TEXT_RE.test(t) || NEXT_LABEL_RE.test(t))) ||
+        (label && NEXT_LABEL_RE.test(label)) ||
+        (inPager && /^[→›»>]$/.test(t));
+      if (ok && visible(el)) return el;
+    }
+    return nextByUrl();
+  }
+  // Last resort: a pagination link whose ?page= is exactly current + 1 (Etsy, Shopee, many others).
+  function pageParam(u) {
+    try { var p = new URL(u, location.href).searchParams; return parseInt(p.get('page') || p.get('p') || p.get('pg') || '', 10) || 0; } catch (e) { return 0; }
+  }
+  function nextByUrl() {
+    var cur = pageParam(location.href) || 1;
+    var links = document.querySelectorAll('a[href*="page="], a[href*="p="], a[href*="pg="]');
+    for (var i = 0; i < links.length; i++) {
+      if (host && host.contains(links[i])) continue;
+      if (pageParam(links[i].getAttribute('href')) === cur + 1 && visible(links[i])) return links[i];
     }
     return null;
+  }
+  // Anti-bot walls (Etsy uses DataDome; others use PerimeterX / hCaptcha / reCAPTCHA).
+  function botWall() {
+    if (document.querySelector('iframe[src*="captcha-delivery.com"], iframe[src*="hcaptcha.com"], iframe[src*="recaptcha"], #px-captcha, [id^="ddChallenge"]')) return true;
+    return /captcha|verify you are (a )?human|are you a robot|access denied|请验证|人机验证/i.test(document.title || '');
+  }
+  async function waitBotWall() {
+    if (!botWall()) return true;
+    notify('需要人工验证', siteLabel(currentSite()) + ' 弹出了反爬验证，请在页面上完成验证，脚本会自动继续');
+    log('检测到网站反爬验证（' + (PKEY === 'etsy' ? 'Etsy DataDome' : '验证码') + '），请在页面上手动完成，脚本最多等 30 分钟', true);
+    var ok = await waitFor(function () { return !running || !botWall(); }, 30 * 60000);
+    if (ok && running) { log('验证已通过，放慢速度继续采集'); await sleep(4000 + Math.random() * 4000); }
+    return ok && running;
   }
   async function clickNext(el) {
     try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
@@ -1356,6 +1387,7 @@ const COLLECTOR_BODY = String.raw`
     var idle = 0, t = ctx.task;
     refreshSets();
     while (running && ctx.saved < ctx.target && !capReached()) {
+      if (botWall() && !(await waitBotWall())) break;
       fill(ctx);
       if (ctx.backlog.length) { await sleep(800); continue; }
       if (idle >= (isAmazon() ? 2 : 6)) {
@@ -1389,7 +1421,8 @@ const COLLECTOR_BODY = String.raw`
       if (retryGaveUp) { if (await handleRetryGiveUp(ctx)) return; break; }
       idle++;
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
-      await sleep(1800 + Math.random() * 1500);
+      // Etsy's DataDome flags fast scrolling, so move at a more human pace there.
+      await sleep(PKEY === 'etsy' ? 3500 + Math.random() * 3000 : 1800 + Math.random() * 1500);
     }
     if (!running) queue.length = 0;
     while (pending()) await sleep(800);
@@ -1447,7 +1480,9 @@ const COLLECTOR_BODY = String.raw`
     }
     var optional = PLAT.metric === 'optional';
     var hasGoods = function () { return extract(optional).length > 0; };
+    if (botWall() && !(await waitBotWall())) return;
     var found = await waitFor(hasGoods, 15000);
+    if (!found && botWall()) { if (!(await waitBotWall())) return; found = await waitFor(hasGoods, 15000); }
     // A URL-opened search can come back empty even though typing the same words into the site's box works.
     if (!found && t.type === 'search' && !t.typed) {
       t.typed = true; setJob(job);
@@ -2105,7 +2140,7 @@ const COLLECTOR_BODY = String.raw`
         '<div data-pane="main">' +
           row(field('最低销量/评价数', input('minSales', 'type="number" min="1"')), field('每次搜索采集', input('target', 'type="number" min="1"'))) +
           row(field('卖', '<select data-k="gender" style="' + inputCss + '"><option value="men">男装</option><option value="women">女装</option></select>'), field('进店数量', input('storeCount', 'type="number" min="0"'))) +
-          row(field('每家店采集', input('storeTarget', 'type="number" min="1"')), field('最多翻页', input('maxPages', 'type="number" min="1"'))) +
+          row(field('每家店采集', input('storeTarget', 'type="number" min="1"')), field('最��翻页', input('maxPages', 'type="number" min="1"'))) +
           check('userFirst', '把我当前搜索框里的关键词排在第一个（也会先重新搜索再采）') +
           check('enterStore', '高销量商品自动进店铺采集，采完退出店铺继续') +
           row(field('进店销量门槛（≥）', input('storeMinSales', 'type="number" min="0"')), '<span style="flex:1"></span>') +
@@ -2514,7 +2549,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.24.0',
+    '// @version      6.25.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
