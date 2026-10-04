@@ -473,7 +473,7 @@ const COLLECTOR_BODY = String.raw`
       out.push({
         goodsId: id, key: PKEY === 'temu' ? id : PKEY + '_' + id, title: title, el: card,
         productUrl: 'https://' + u.hostname + u.pathname, imageUrl: img.src,
-        salesText: found.metric ? found.metric.text : '无销量数据', salesCount: found.metric ? found.metric.count : 0, noMetric: !found.metric
+        salesText: found.metric ? found.metric.text : '���销量数据', salesCount: found.metric ? found.metric.count : 0, noMetric: !found.metric
       });
     }
     return out;
@@ -755,24 +755,31 @@ const COLLECTOR_BODY = String.raw`
     var g = cv.getContext('2d', { willReadFrequently: true });
     g.drawImage(bmp, 0, 0, W, H);
     var x0 = Math.round(W * 0.22), y0 = Math.round(H * 0.28), w = Math.round(W * 0.56), h = Math.round(H * 0.54);
-    var d = g.getImageData(x0, y0, w, h).data;
-    var dark = 0, light = 0, n = 0;
-    for (var i = 0; i < d.length; i += 4) {
-      var mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
-      n++;
-      if (mx < 75 && mx - mn < 45) dark++;
-      else if (mn > 185 && mx - mn < 40) light++;
-    }
-    // Share of sharp edges / colored pixels in the chest area: a plain tee has almost none, a printed one has plenty.
-    var edges = 0, colored = 0, cells = 0;
-    function lum(o) { return d[o] * 0.299 + d[o + 1] * 0.587 + d[o + 2] * 0.114; }
-    for (var yy = 0; yy < h - 1; yy++) {
-      for (var xx = 0; xx < w - 1; xx++) {
-        var o = (yy * w + xx) * 4, l0 = lum(o);
-        cells++;
-        if (Math.abs(l0 - lum(o + 4)) > 38 || Math.abs(l0 - lum(o + w * 4)) > 38) edges++;
-        if (Math.max(d[o], d[o + 1], d[o + 2]) - Math.min(d[o], d[o + 1], d[o + 2]) > 60) colored++;
+    var shirt = shirtStats(g.getImageData(0, 0, W, H).data, W, H);
+    var dark, light, printRatio;
+    if (shirt) {
+      dark = shirt.dark; light = shirt.light; printRatio = shirt.print;
+    } else {
+      // Couldn't find the shirt body: fall back to the fixed chest box.
+      var d = g.getImageData(x0, y0, w, h).data;
+      var nd = 0, nl = 0, n = 0;
+      for (var i = 0; i < d.length; i += 4) {
+        var mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
+        n++;
+        if (mx < 75 && mx - mn < 45) nd++;
+        else if (mn > 185 && mx - mn < 40) nl++;
       }
+      var edges = 0, colored = 0, cells = 0;
+      var lum = function (o) { return d[o] * 0.299 + d[o + 1] * 0.587 + d[o + 2] * 0.114; };
+      for (var yy = 0; yy < h - 1; yy++) {
+        for (var xx = 0; xx < w - 1; xx++) {
+          var o = (yy * w + xx) * 4, l0 = lum(o);
+          cells++;
+          if (Math.abs(l0 - lum(o + 4)) > 38 || Math.abs(l0 - lum(o + w * 4)) > 38) edges++;
+          if (Math.max(d[o], d[o + 1], d[o + 2]) - Math.min(d[o], d[o + 1], d[o + 2]) > 60) colored++;
+        }
+      }
+      dark = nd / n; light = nl / n; printRatio = Math.max(edges / cells, colored / cells);
     }
     var sc = document.createElement('canvas');
     sc.width = 9; sc.height = 8;
@@ -782,7 +789,68 @@ const COLLECTOR_BODY = String.raw`
     function gray(x, y) { var o = (y * 9 + x) * 4; return p[o] * 0.299 + p[o + 1] * 0.587 + p[o + 2] * 0.114; }
     for (var y = 0; y < 8; y++) for (var x = 0; x < 8; x++) bits += gray(x, y) > gray(x + 1, y) ? '1' : '0';
     for (var b = 0; b < 64; b += 4) hex += parseInt(bits.substr(b, 4), 2).toString(16);
-    return { dark: dark / n, light: light / n, hash: hex, print: Math.max(edges / cells, colored / cells) };
+    return { dark: dark, light: light, hash: hex, print: printRatio, shirt: !!shirt };
+  }
+  // Finds the top garment by its main color (sampled from the chest sides, where prints rarely sit),
+  // walks down row by row until the color stops (pants / skirt / bag start), and measures
+  // dark/light share and print only inside that shirt body. Pants, bags, arms and background are ignored.
+  function shirtStats(px, W, H) {
+    function L(o) { return px[o] * 0.299 + px[o + 1] * 0.587 + px[o + 2] * 0.114; }
+    var bins = {}, bestK = null, best = 0;
+    for (var y = Math.round(H * 0.28); y < H * 0.5; y += 2) {
+      for (var x = Math.round(W * 0.26); x < W * 0.74; x += 2) {
+        if (x > W * 0.4 && x < W * 0.6) continue;
+        var o = (y * W + x) * 4, k = (px[o] >> 5) + ',' + (px[o + 1] >> 5) + ',' + (px[o + 2] >> 5);
+        var b = bins[k] || (bins[k] = { n: 0, r: 0, g: 0, b: 0 });
+        b.n++; b.r += px[o]; b.g += px[o + 1]; b.b += px[o + 2];
+        if (b.n > best) { best = b.n; bestK = k; }
+      }
+    }
+    if (!bestK) return null;
+    var B = bins[bestK], br = B.r / B.n, bg = B.g / B.n, bb = B.b / B.n, bl = br * 0.299 + bg * 0.587 + bb * 0.114;
+    function isBody(o) {
+      var dr = px[o] - br, dg = px[o + 1] - bg, db = px[o + 2] - bb;
+      if (dr * dr + dg * dg + db * db < 3600) return true;
+      var dl = L(o) - bl;
+      // Same hue, just lighter/darker = fabric shading or folds, still the shirt.
+      return Math.abs(dl) < 90 && Math.max(Math.abs(dr - dl), Math.abs(dg - dl), Math.abs(db - dl)) < 30;
+    }
+    var xa = Math.round(W * 0.08), xb = Math.round(W * 0.92), rows = [];
+    for (y = 0; y < H; y++) {
+      var lo = -1, hi = -1, cnt = 0;
+      for (x = xa; x < xb; x++) if (isBody((y * W + x) * 4)) { cnt++; if (lo < 0) lo = x; hi = x; }
+      rows.push(hi - lo >= W * 0.25 && cnt >= W * 0.08 ? { lo: lo, hi: hi } : null);
+    }
+    var seed = -1;
+    for (var s = 0; s < 20 && seed < 0; s++) {
+      var a = Math.round(H * 0.4) + (s % 2 ? -1 : 1) * Math.ceil(s / 2);
+      if (rows[a]) seed = a;
+    }
+    if (seed < 0) return null;
+    function extend(from, step, limit) {
+      var last = from, gap = 0;
+      for (var yy = from + step; yy >= 0 && yy < H && (step > 0 ? yy <= limit : yy >= limit); yy += step) {
+        if (rows[yy]) { last = yy; gap = 0; } else if (++gap > 5) break;
+      }
+      return last;
+    }
+    var top = extend(seed, -1, Math.round(H * 0.08)), bot = extend(seed, 1, Math.round(H * 0.8));
+    if (bot - top < H * 0.15) return null;
+    var tot = 0, nd = 0, nl = 0, off = 0, edges = 0;
+    for (y = top; y <= bot; y++) {
+      var r = rows[y]; if (!r) continue;
+      var span = r.hi - r.lo, il = Math.max(r.lo + Math.round(span * 0.12), Math.round(W * 0.18)), ir = Math.min(r.hi - Math.round(span * 0.12), Math.round(W * 0.82));
+      for (x = il; x < ir; x++) {
+        var o2 = (y * W + x) * 4, mx = Math.max(px[o2], px[o2 + 1], px[o2 + 2]), mn = Math.min(px[o2], px[o2 + 1], px[o2 + 2]);
+        tot++;
+        if (mx < 75 && mx - mn < 45) nd++; else if (mn > 185 && mx - mn < 40) nl++;
+        if (!isBody(o2)) off++;
+        var l0 = L(o2);
+        if (Math.abs(l0 - L(o2 + 4)) > 38 || (y < bot && Math.abs(l0 - L(o2 + W * 4)) > 38)) edges++;
+      }
+    }
+    if (tot < 300) return null;
+    return { dark: nd / tot, light: nl / tot, print: Math.max(edges / tot, off / tot) };
   }
   var POP = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
   function bitsOf(h) { var c = 0; for (var i = 0; i < h.length; i++) c += POP[parseInt(h[i], 16)]; return c; }
@@ -798,7 +866,7 @@ const COLLECTOR_BODY = String.raw`
   }
   async function aiCheck(item) {
     var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件 T 恤的印花图案。商品标题：' + item.title +
-      '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断，���返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满,"plain":是否纯色素面没有任何印花图案,"notColor":衣服主体是否不是' + colorName(item.ctx) + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
+      '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件 T 恤本身，裤子和配饰的颜色、图案一律忽略。���返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满,"plain":是否纯色素面没有任何印花图案,"notColor":衣服主体是否不是' + colorName(item.ctx) + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
     var content = cfg.aiVision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: item.imageUrl } }]
       : prompt;
@@ -2210,7 +2278,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v6.21.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v6.22.0' + (cfg.useAi ? '' : ' · 豆包已关闭') + ' �� 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 })();
 `
@@ -2240,7 +2308,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.21.0',
+    '// @version      6.22.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
