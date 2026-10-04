@@ -148,7 +148,8 @@ const COLLECTOR_BODY = String.raw`
       hi: function (u) { return u.split('?')[0].replace(/_thumbnail_\d+x\d*/i, ''); }
     },
     etsy: {
-      host: /(^|\.)etsy\.com$/i, img: /etsystatic\.com$/i, metric: 'reviews',
+      // Many Etsy cards show no review count, so a missing metric must not hide the card.
+      host: /(^|\.)etsy\.com$/i, img: /etsystatic\.com$/i, metric: 'optional',
       search: function (s, k) { return s.origin + (s.prefix ? '/' + s.prefix : '') + '/search?q=' + encodeURIComponent(k); },
       isSearch: function () { return /\/search(\/|$)/.test(location.pathname); },
       goods: function (h) { var m = h.match(/\/listing\/(\d{6,})/); return m ? m[1] : null; },
@@ -1042,7 +1043,7 @@ const COLLECTOR_BODY = String.raw`
       '已采集并同步：' + s.saved + ' 张' + (cfg.dailyCap ? '（每日上限 ' + cfg.dailyCap + '）' : ''),
       '去重拦截（没花灵豆）：' + s.dup + ' 张',
       '审核跳过：' + s.skipped + ' 张',
-      '失败：' + s.failed,
+      '失���：' + s.failed,
       '各站点：' + joinMap(s.sites),
       '跳过原因：' + joinMap(s.reasons),
       '去重库累计已同步：' + synced.size + ' 张'].join('\n');
@@ -1359,17 +1360,37 @@ const COLLECTOR_BODY = String.raw`
     return null;
   }
   // Anti-bot walls (Etsy uses DataDome; others use PerimeterX / hCaptcha / reCAPTCHA).
+  var HARD_BLOCK_RE = /access is temporarily restricted|unusual activity|we detected unusual|you have been blocked|your access .{0,20}blocked|request (was|has been) blocked|zugriff .{0,20}eingeschränkt|accès .{0,20}restreint|访问受限|访问被拒绝/i;
+  // DataDome's hard block page has no captcha to solve: it is a tiny page with a short message.
+  function hardBlocked() {
+    var body = document.body;
+    if (!body || document.querySelectorAll('a[href]').length > 40) return false;
+    return HARD_BLOCK_RE.test((body.innerText || '').slice(0, 2000));
+  }
   function botWall() {
     if (document.querySelector('iframe[src*="captcha-delivery.com"], iframe[src*="hcaptcha.com"], iframe[src*="recaptcha"], #px-captcha, [id^="ddChallenge"]')) return true;
-    return /captcha|verify you are (a )?human|are you a robot|access denied|请验证|人机验证/i.test(document.title || '');
+    if (/captcha|verify you are (a )?human|are you a robot|access denied|请验证|人机验证/i.test(document.title || '')) return true;
+    return hardBlocked();
   }
   async function waitBotWall() {
     if (!botWall()) return true;
-    notify('需要人工验证', siteLabel(currentSite()) + ' 弹出了反爬验证，请在页面上完成验证，脚本会自动继续');
-    log('检测到网站反爬验证（' + (PKEY === 'etsy' ? 'Etsy DataDome' : '验证码') + '），请在页面上手动完成，脚本最多等 30 分钟', true);
-    var ok = await waitFor(function () { return !running || !botWall(); }, 30 * 60000);
-    if (ok && running) { log('验证已通过，放慢速度继续采集'); await sleep(4000 + Math.random() * 4000); }
-    return ok && running;
+    var hard = hardBlocked() && !document.querySelector('iframe[src*="captcha-delivery.com"]');
+    if (hard) {
+      notify('网站暂时限制访问', siteLabel(currentSite()) + ' 判定访问太频繁，暂时封了这个 IP');
+      log((PKEY === 'etsy' ? 'Etsy（DataDome）' : '网站') + '判定访问异常，暂时限制了这个网络/IP，页面上没有验证码可点。建议：①换网络或代理节点后刷新页面；②或者先停 20~60 分钟。脚本会每分钟刷新一次检查是否解封，最多等 30 分钟', true);
+    } else {
+      notify('需要人工验证', siteLabel(currentSite()) + ' 弹出了反爬验证，请在页面上完成验证，脚本会自动继续');
+      log('检测到网站反爬验证（' + (PKEY === 'etsy' ? 'Etsy DataDome' : '验证码') + '），请在页面上手动完成，脚本最多等 30 分钟', true);
+    }
+    var start = Date.now(), lastReload = Date.now();
+    while (running && botWall() && Date.now() - start < 30 * 60000) {
+      await sleep(3000);
+      // A hard block only lifts on a fresh request; the job is saved, so reloading resumes where it stopped.
+      if (hard && Date.now() - lastReload > 60000 + Math.random() * 30000) { lastReload = Date.now(); location.reload(); await sleep(60000); return false; }
+    }
+    var ok = running && !botWall();
+    if (ok) { log('验证已通过，放慢速度继续采集'); await sleep(4000 + Math.random() * 4000); }
+    return ok;
   }
   async function clickNext(el) {
     try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
@@ -1431,7 +1452,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.26.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.27.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -1659,7 +1680,8 @@ const COLLECTOR_BODY = String.raw`
         if (t.tries > 3) { log('打不开「' + taskLabel(t) + '」，跳过', true); job.idx++; setJob(job); continue; }
         t.navigated = true; setJob(job);
         log('前往：' + taskLabel(t));
-        await sleep(1500 + Math.random() * 1500);
+        // Etsy's DataDome scores request rhythm; back-to-back page loads get the IP restricted.
+        await sleep(PKEY === 'etsy' ? 8000 + Math.random() * 7000 : 1500 + Math.random() * 1500);
         location.href = taskUrl(t);
         return;
       }
@@ -2594,7 +2616,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.26.0',
+    '// @version      6.27.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
