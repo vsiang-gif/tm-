@@ -214,7 +214,7 @@ const COLLECTOR_BODY = String.raw`
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
   var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]/i;
-  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|tr���ng|putih|branc[ao]/i;
+  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|tr����ng|putih|branc[ao]/i;
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
     ['nera', 'bianca'], ['nero', 'bianco'], ['pretas', 'brancas'], ['pretos', 'brancos'], ['preta', 'branca'], ['preto', 'branco'],
@@ -497,7 +497,51 @@ const COLLECTOR_BODY = String.raw`
     }
     return out;
   }
+  var SHEIN_ALL_ITEMS_RE = /^(All Items|View All|Visit Store|Alle Artikel|Tous les articles|Tutti gli articoli|Todos los art[ií]culos|Todos os itens|Alle items|Wszystkie produkty|全部商品|所有商品|すべての商品|전체 상품|كل المنتجات)$/i;
+  function sheinStoreBlock() {
+    var heads = document.querySelectorAll('h1,h2,h3,h4,div,span,p');
+    for (var i = 0; i < heads.length; i++) {
+      var el = heads[i];
+      if (el.children.length > 2 || !/^(About Store|Über den Shop|À propos de la boutique|Informazioni sul negozio|Acerca de la tienda|Sobre a loja|关于店铺|店铺信息)$/i.test((el.textContent || '').trim())) continue;
+      for (var p = el.parentElement, d = 0; p && d < 5; p = p.parentElement, d++) {
+        if (p.querySelector('a[href*="store_code="]') || findAllItemsIn(p)) return p;
+      }
+    }
+    return null;
+  }
+  function findAllItemsIn(root) {
+    var els = root.querySelectorAll('a,button,div,span');
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      if (host.contains(el)) continue;
+      var t = (el.textContent || '').trim();
+      if (t.length > 30 || !SHEIN_ALL_ITEMS_RE.test(t)) continue;
+      var r = el.getBoundingClientRect();
+      if (r.width < 20 || r.height < 12) continue;
+      return el;
+    }
+    return null;
+  }
+  function sheinStoreUrl(id) { return location.origin + '/store/home?store_code=' + id; }
+  function findSheinStore() {
+    var block = sheinStoreBlock();
+    if (block) {
+      var a = block.querySelector('a[href*="store_code="]');
+      var id0 = a && PLAT.store(a.href);
+      if (id0) return { storeId: id0, url: a.href };
+    }
+    // The product's own store is in the page data; recommendation widgets use other keys, so this stays specific.
+    var html = document.documentElement.innerHTML;
+    var m = html.match(/["']?store_?[cC]ode["']?\s*[:=]\s*["']?(\d{4,})/);
+    if (m) return { storeId: m[1], url: sheinStoreUrl(m[1]) };
+    var btn = (block && findAllItemsIn(block)) || findAllItemsIn(document.body);
+    if (btn) return { storeId: '', url: '', clickEl: btn };
+    return null;
+  }
   function findStoreLink() {
+    var here = PLAT.store(location.href);
+    if (here) return { storeId: here, url: location.href };
+    if (PKEY === 'shein') { var sh = findSheinStore(); if (sh) return sh; }
     var anchors = document.querySelectorAll('a[href]');
     for (var i = 0; i < anchors.length; i++) {
       var id = PLAT.store(anchors[i].href);
@@ -1311,7 +1355,7 @@ const COLLECTOR_BODY = String.raw`
       if (isRetry) {
         if (retryClicks >= 2) {
           notify('「再试一次」加载失败', '脚本点击没反应。45 秒内你手动点一下即可；不点的话脚本会自动刷新页面接着采（已采的不会重复）。');
-          log('「再试一次」脚本点击无效，45 秒内可手动点一下；否则自动刷新页面继续（已采过的会跳过，不重复花灵豆）');
+          log('「再试一次」脚本点击无效，45 秒内可手动点一下；否则自动刷新页面��续（已采过的会跳过，不重复花灵豆）');
           if (await waitFor(function () { return productCount() > before; }, 45000)) { await sleep(1200); return true; }
           retryGaveUp = true;
           return false;
@@ -1480,7 +1524,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.30.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.31.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -1505,6 +1549,31 @@ const COLLECTOR_BODY = String.raw`
     for (var t = 0; t < ms; t += 500) { if (fn()) return true; await sleep(500); }
     return false;
   }
+  // SHEIN's「All Items」is often a scripted button, not a link. Click it like a person and catch where it goes:
+  // a new-tab open is intercepted, an in-page route change is read from the URL, and a full navigation reloads
+  // this script on the store page, where findStoreLink reads the store id straight from location.
+  async function clickStoreEntry(el, t, job) {
+    log('商品 ' + t.goodsId + ' 点击「About Store → All Items」进入店铺');
+    t.clickedStore = (t.clickedStore || 0) + 1; setJob(job);
+    if (t.clickedStore > 2) { log('点了 2 次「All Items」都没进到店铺，跳过', true); return null; }
+    var W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    var opened = '', origOpen = W.open;
+    try { W.open = function (u) { opened = String(u || ''); return null; }; } catch (e) {}
+    var a = el.closest && el.closest('a[target]');
+    if (a) a.removeAttribute('target');
+    try {
+      await humanClick(el);
+      await waitFor(function () { return opened || PLAT.store(location.href); }, 10000);
+    } finally {
+      try { W.open = origOpen; } catch (e) {}
+    }
+    if (opened) {
+      var url = new URL(opened, location.href).href, id = PLAT.store(url);
+      if (id) return { storeId: id, url: url };
+    }
+    var here = PLAT.store(location.href);
+    return here ? { storeId: here, url: location.href } : null;
+  }
   async function runTask(t, job) {
     if (t.type === 'goods') {
       var soldOut = function () {
@@ -1514,6 +1583,7 @@ const COLLECTOR_BODY = String.raw`
       await waitFor(function () { return findStoreLink() || soldOut(); }, 15000);
       if (soldOut()) { log('商品 ' + t.goodsId + ' 已售罄/下架，跳过进店'); ensureReturn(t, job); return; }
       var link = findStoreLink();
+      if (link && link.clickEl) link = await clickStoreEntry(link.clickEl, t, job);
       if (!link) { log('商品 ' + t.goodsId + ' 没找到店铺入口', true); ensureReturn(t, job); return; }
       var sk = PKEY + ':' + link.storeId;
       if (job.visitedStores.indexOf(sk) >= 0) { log('店铺 ' + link.storeId + ' 已采过，跳过'); ensureReturn(t, job); return; }
@@ -1729,7 +1799,7 @@ const COLLECTOR_BODY = String.raw`
           }
           notify('Temu 国家不对', '当前是「' + realName + '」站，需要切换到「' + wantName + '」');
           job.paused = true; t.tries = 0; t.navigated = false; setJob(job); running = false;
-          log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」。Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
+          log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」。Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点��面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
           render();
           return;
         }
@@ -1930,7 +2000,7 @@ const COLLECTOR_BODY = String.raw`
     var isStoreBox = function (el) { return STORE_BOX.test((el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.className || '')); };
     var inp = inStore ? (boxes.find(isStoreBox) || null) : boxes.find(function (el) { return !isStoreBox(el); });
     if (!inp && inStore) { log('店铺页没找到店内搜索框', true); return false; }
-    if (!inp) { log('页面上没找到搜索框', true); return false; }
+    if (!inp) { log('页面上没找���搜索框', true); return false; }
     // Events must be built with the page's own constructors, or the site's framework ignores them.
     var Ev = W.Event || Event, KEv = W.KeyboardEvent || KeyboardEvent, IEv = W.InputEvent || Ev;
     var setter = Object.getOwnPropertyDescriptor((W.HTMLInputElement || HTMLInputElement).prototype, 'value').set;
@@ -2137,7 +2207,7 @@ const COLLECTOR_BODY = String.raw`
   async function recommendSites() {
     var list = SITES.map(function (s) { return s.id + '=' + siteLabel(s); }).join('，');
     log('正在问豆包哪些平台和国家黑色印花 T 恤卖得好…');
-    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的平台和国家站点采集爆款图案。请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
+    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，���去销量高的平台和国家站点采集爆款图案。请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
     var ids = (r.sites || r.countries || []).map(function (x) { return String(x).toLowerCase(); });
     SITES.forEach(function (s) { cfg.sites[s.id].on = ids.indexOf(s.id) >= 0; });
     if (!ids.some(function (id) { return cfg.sites[id]; })) cfg.sites['temu-us'].on = true;
@@ -2200,7 +2270,7 @@ const COLLECTOR_BODY = String.raw`
           check('blackOnly', '只要指定颜色款（按下面的颜色模式过滤）') +
           field('颜色模式', '<select data-k="colorMode" style="' + inputCss + '"><option value="black">只采黑 T</option><option value="white">只采白 T</option><option value="rotate">轮换：先黑 T 再白 T</option></select>') +
           row(field('每站黑 T 采集（张）', input('blackCount', 'type="number" min="0"')), field('每站白 T 采集（张）', input('whiteCount', 'type="number" min="0"'))) +
-          hint('轮换模式：每个站点先用黑 T 关键词采够设定张数，再自动换成白 T 关键词（自动把 black/schwarz/noir/黑 等换成 white/weiß/blanc/白）。0 = 不限。') +
+          hint('轮换模式：每个站点先用黑 T 关键词采够设定张数，再自动换成�� T 关键词（自动把 black/schwarz/noir/黑 等换成 white/weiß/blanc/白）。0 = 不限。') +
           hint('Etsy / Amazon 卡片不显示销量，用评价数代替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。') +
         '</div>' +
         '<div data-pane="country" style="display:none">' +
@@ -2688,7 +2758,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.30.0',
+    '// @version      6.31.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
