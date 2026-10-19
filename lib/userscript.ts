@@ -289,7 +289,39 @@ const COLLECTOR_BODY = String.raw`
   var skipList = [], removeList = [], femaleList = [], maleList = [];
 
   function save() { GM_setValue('cfg', cfg); }
-  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function rawSleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  // Every wait in the run loop goes through sleep, so blocking here pauses the whole job while offline.
+  async function sleep(ms) { await rawSleep(ms); if (netOffline || !navigator.onLine) await waitOnline(); }
+  var netOffline = false, netWaiter = null;
+  function probeNet() {
+    if (!navigator.onLine) return Promise.resolve(false);
+    return new Promise(function (r) {
+      var settled = false;
+      function finish(ok) { if (!settled) { settled = true; r(ok); } }
+      setTimeout(function () { finish(false); }, 10000);
+      try {
+        // GM_xmlhttpRequest bypasses page CSP; any HTTP status (even 403/404) means the network is up.
+        GM_xmlhttpRequest({ method: 'HEAD', url: location.origin + '/robots.txt?_=' + Date.now(), timeout: 9000,
+          onload: function () { finish(true); }, onerror: function () { finish(false); }, ontimeout: function () { finish(false); } });
+      } catch (e) { finish(navigator.onLine); }
+    });
+  }
+  function waitOnline() {
+    if (netWaiter) return netWaiter;
+    netWaiter = (async function () {
+      var since = Date.now();
+      if (!netOffline) { netOffline = true; log('网络断开，采集已自动暂停，联网后会自动继续', true); render(); }
+      while (!(await probeNet())) await rawSleep(5000);
+      // Give DNS / proxy a moment to settle before hitting the shop again.
+      await rawSleep(3000);
+      netOffline = false; netWaiter = null; lastProgress = Date.now();
+      log('网络已恢复（断网 ' + Math.max(1, Math.round((Date.now() - since) / 1000)) + ' 秒），继续采集');
+      render();
+    })();
+    return netWaiter;
+  }
+  window.addEventListener('offline', function () { if (getJob()) waitOnline(); });
+  window.addEventListener('online', function () { if (netOffline) log('检测到网络已连接，正在确认…'); });
   function today() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function pad(n) { return String(n).padStart(2, '0'); }
   function normTime(x) { var m = String(x || '').trim().match(/^(\d{1,2})[:：](\d{2})$/); return m && +m[1] < 24 && +m[2] < 60 ? pad(m[1]) + ':' + m[2] : ''; }
@@ -562,7 +594,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- network ----------
-  function gmRequest(opts) {
+  function gmRequestOnce(opts) {
     return new Promise(function (resolve, reject) {
       GM_xmlhttpRequest(Object.assign({ timeout: 90000 }, opts, {
         onload: resolve,
@@ -570,6 +602,16 @@ const COLLECTOR_BODY = String.raw`
         ontimeout: function () { reject(new Error('请求超时')); }
       }));
     });
+  }
+  // A request that dies because the connection dropped waits for the network and is retried, instead of counting as 失败.
+  async function gmRequest(opts) {
+    for (var attempt = 0; ; attempt++) {
+      try { return await gmRequestOnce(opts); }
+      catch (e) {
+        if (attempt >= 5 || (await probeNet())) throw e;
+        await waitOnline();
+      }
+    }
   }
   // ---------- hand-off to the 灵图卖家辅助工具 Chrome extension ----------
   // The extension injects a 「采集并同步 (Alt+1)」 button into each product card on hover.
@@ -1524,7 +1566,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.31.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.32.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -2166,6 +2208,7 @@ const COLLECTOR_BODY = String.raw`
 
   // Stalled page (blank, frozen, endless spinner): reload; the saved job resumes where it left off.
   setInterval(function () {
+    if (netOffline) { lastProgress = Date.now(); return; }
     if (!running || waitingHuman || resting || Date.now() - lastProgress < 6 * 60000) return;
     var j = getJob(), t = j && j.tasks[j.idx];
     if (!t) return;
@@ -2674,7 +2717,7 @@ const COLLECTOR_BODY = String.raw`
     starting = true; render();
     try {
       var tasks = await buildTasks(ids);
-      if (!tasks.length) { showTab('country'); log('「' + names + '」还没有关键词，请先填写或点「自动生成」', true); return; }
+      if (!tasks.length) { showTab('country'); log('「' + names + '」还没有关键词，请��填写或点「自动生成」', true); return; }
       log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个关键词');
       startJob(withUserFirst(tasks));
     } finally { starting = false; render(); }
@@ -2713,7 +2756,7 @@ const COLLECTOR_BODY = String.raw`
     var j = getJob();
     $('pause').textContent = j && !running ? '继续' : '暂停';
     var sb = $('start');
-    sb.textContent = j ? (running ? '采集中…' : '已暂停') : starting ? '准备中…' : '开始多站点采集';
+    sb.textContent = j ? (running ? (netOffline ? '断网暂停中…' : '采集中…') : '已暂停') : starting ? '准备中…' : '开始多站点采集';
     sb.style.background = j ? (running ? '#16a34a' : '#b7791f') : C.blue;
     sb.style.cursor = j || starting ? 'default' : 'pointer';
     $('pause').disabled = !j;
@@ -2758,7 +2801,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.31.0',
+    '// @version      6.32.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
