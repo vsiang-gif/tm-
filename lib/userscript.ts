@@ -1617,7 +1617,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.33.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.34.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -2347,17 +2347,17 @@ const COLLECTOR_BODY = String.raw`
   try { if (window.trustedTypes && trustedTypes.createPolicy) ttPolicy = trustedTypes.createPolicy('lingtuCollector', { createHTML: function (x) { return x; } }); } catch (e) {}
   function safeHTML(x) { return ttPolicy ? ttPolicy.createHTML(x) : x; }
   var host = document.createElement('div');
-  host.setAttribute('style', 'position:fixed;right:20px;bottom:20px;z-index:2147483647;width:350px;background:' + C.bg + ';color:' + C.text + ';font:13px/1.5 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.4);padding:14px');
+  host.setAttribute('style', 'position:fixed;top:0;right:0;height:100vh;z-index:2147483647;width:350px;box-sizing:border-box;display:flex;flex-direction:column;background:' + C.bg + ';color:' + C.text + ';font:13px/1.5 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;border-radius:10px 0 0 10px;box-shadow:-10px 0 30px rgba(0,0,0,.35);padding:14px');
   host.innerHTML = safeHTML(
-    '<div data-k="drag" title="按住面板任意空白处都能拖动（双击标题栏恢复位置）" style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:-14px -14px 8px;padding:10px 14px 6px;cursor:move;user-select:none;touch-action:none">' +
+    '<div data-k="drag" style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:-14px -14px 8px;padding:10px 14px 6px;user-select:none;flex-shrink:0">' +
       '<strong style="font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">爆款图案采集 → 灵图 · ' + PNAMES[PKEY] + ' <span style="color:' + C.dim + ';font-weight:400;font-size:12px">v' + SCRIPT_VERSION + '</span></strong>' +
       '<span style="display:flex;align-items:center;gap:6px;flex-shrink:0">' +
         '<button data-k="reload" title="装了新版本后点这里刷新页面，让新版本生效" style="background:' + C.green + ';border:0;color:#111;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;font-weight:600">刷新版本</button>' +
         '<button data-k="min" aria-label="收起" style="background:none;border:0;color:' + C.dim + ';cursor:pointer;font-size:16px">–</button>' +
       '</span></div>' +
-    '<div data-k="body">' +
+    '<div data-k="body" style="flex:1;min-height:0;display:flex;flex-direction:column">' +
       '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '站点') + tabBtn('filter', '过滤') + tabBtn('auto', '自动') + tabBtn('api', '豆包/去重') + '</div>' +
-      '<div data-k="scroll" style="max-height:52vh;overflow:auto;padding-right:2px">' +
+      '<div data-k="scroll" style="flex:1;min-height:0;overflow:auto;padding-right:2px">' +
         '<div data-pane="main">' +
           row(field('最低销量/评价数', input('minSales', 'type="number" min="1"')), field('每次搜索采集', input('target', 'type="number" min="1"'))) +
           row(field('卖', '<select data-k="gender" style="' + inputCss + '"><option value="men">男装</option><option value="women">女装</option></select>'), field('进店数量', input('storeCount', 'type="number" min="0"'))) +
@@ -2451,7 +2451,7 @@ const COLLECTOR_BODY = String.raw`
       '<div data-k="stats" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px;color:' + C.dim + '"></div>' +
       '<div data-k="log" style="margin-top:6px;max-height:110px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;color:' + C.cyan + '"></div>' +
     '</div>' +
-    '<div data-k="resize" title="拖动缩放面板（双击恢复默认）" aria-label="缩放面板" style="position:absolute;right:0;bottom:0;width:22px;height:22px;cursor:nwse-resize;touch-action:none;border-bottom-right-radius:10px;background:linear-gradient(135deg,transparent 0 50%,' + C.dim + ' 50% 58%,transparent 58% 68%,' + C.dim + ' 68% 76%,transparent 76% 86%,' + C.dim + ' 86% 94%,transparent 94%)"></div>');
+    '<div data-k="resize" title="拖动左边缘调整面板宽度（双击恢复默认）" aria-label="调整面板宽度" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:ew-resize;touch-action:none"></div>');
   host.id = 'temu-lingtu-collector-panel';
   // Some sites re-render <body> during hydration and drop foreign nodes, so mount on <html> and re-attach if removed.
   function mountPanel() {
@@ -2466,8 +2466,6 @@ const COLLECTOR_BODY = String.raw`
   if (typeof GM_registerMenuCommand === 'function') {
     GM_registerMenuCommand('显示采集面板', function () {
       mountPanel();
-      host.style.right = '20px';
-      host.style.bottom = '20px';
     });
   }
   function $(k) { return host.querySelector('[data-k="' + k + '"]'); }
@@ -2573,107 +2571,42 @@ const COLLECTOR_BODY = String.raw`
     $('skipWords').value = cfg.skipWords; $('removeWords').value = cfg.removeWords;
     save(); compileRules(); log('已恢复默认词库');
   };
-  $('min').onclick = function () { var b = $('body'); b.style.display = b.style.display === 'none' ? '' : 'none'; };
+  $('min').onclick = function () {
+    var b = $('body'), hide = b.style.display !== 'none';
+    b.style.display = hide ? 'none' : 'flex';
+    host.style.height = hide ? 'auto' : '100vh';
+    host.style.borderBottomLeftRadius = '10px';
+  };
   $('reload').onclick = function () {
     if (running && !confirm('正在采集中，刷新后会从当前任务接着跑（已采过的不会重复）。确定刷新吗？')) return;
     log('正在刷新页面加载最新版本…');
     location.reload();
   };
-  // Drag the header to move the panel anywhere; position is remembered as distance from the bottom-right.
+  // Panel is docked to the right edge at full height; drag its left edge to change the width (remembered).
   (function () {
-    var bar = $('drag');
-    if (!bar) return;
-    function clampPos(right, bottom) {
-      var r = host.getBoundingClientRect();
-      host.style.left = 'auto'; host.style.top = 'auto';
-      host.style.right = Math.max(0, Math.min(window.innerWidth - Math.min(r.width, 120), right)) + 'px';
-      host.style.bottom = Math.max(0, Math.min(window.innerHeight - 40, bottom)) + 'px';
-    }
-    var saved = GM_getValue('panelPos', null);
-    if (saved) clampPos(saved.right, saved.bottom);
-    // Any blank spot of the panel starts a drag; controls, text fields and scrollbars keep working normally.
-    var INTERACTIVE = 'button,input,textarea,select,option,label,a,summary,[contenteditable],[data-k="resize"]';
-    function onScrollbar(e) {
-      for (var el = e.target; el && el !== host.parentNode; el = el.parentElement) {
-        if (el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY)) {
-          var rr = el.getBoundingClientRect();
-          if (e.clientX > rr.left + el.clientWidth) return true;
-        }
-        if (el === host) break;
-      }
-      return false;
-    }
-    host.addEventListener('pointerdown', function (e) {
-      if (e.button !== 0 || e.target.closest(INTERACTIVE) || onScrollbar(e)) return;
-      var r = host.getBoundingClientRect();
-      var sx = e.clientX, sy = e.clientY, right0 = window.innerWidth - r.right, bottom0 = window.innerHeight - r.bottom, moved = false, pid = e.pointerId;
-      function move(ev) {
-        if (!moved && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 4) return;
-        if (!moved) { moved = true; try { host.setPointerCapture(pid); } catch (err) {} host.style.cursor = 'move'; }
-        ev.preventDefault();
-        clampPos(right0 - (ev.clientX - sx), bottom0 - (ev.clientY - sy));
-      }
-      function up() {
-        host.removeEventListener('pointermove', move);
-        host.removeEventListener('pointerup', up);
-        host.removeEventListener('pointercancel', up);
-        host.style.cursor = '';
-        if (moved) GM_setValue('panelPos', { right: parseFloat(host.style.right) || 0, bottom: parseFloat(host.style.bottom) || 0 });
-      }
-      host.addEventListener('pointermove', move);
-      host.addEventListener('pointerup', up);
-      host.addEventListener('pointercancel', up);
-    });
-    host.addEventListener('selectstart', function (e) { if (host.style.cursor === 'move') e.preventDefault(); });
-    bar.addEventListener('dblclick', function (e) {
-      if (e.target.closest('button')) return;
-      GM_setValue('panelPos', null);
-      host.style.right = '20px'; host.style.bottom = '20px';
-    });
-  })();
-  // Bottom-right corner handle: drag to resize width and the settings area height; size is remembered.
-  (function () {
-    var grip = $('resize'), scroll = $('scroll');
-    if (!grip || !scroll) return;
-    function apply(sz) {
-      if (!sz) { host.style.width = '350px'; scroll.style.maxHeight = '52vh'; return; }
-      host.style.width = Math.max(300, Math.min(window.innerWidth - 20, sz.w)) + 'px';
-      scroll.style.maxHeight = Math.max(120, Math.min(window.innerHeight - 260, sz.h)) + 'px';
-    }
-    apply(GM_getValue('panelSize', null));
+    var grip = $('resize');
+    GM_setValue('panelPos', null);
+    function apply(w) { host.style.width = (w ? Math.max(300, Math.min(window.innerWidth - 40, w)) : 350) + 'px'; }
+    var saved = GM_getValue('panelSize', null);
+    apply(saved && saved.w);
+    if (!grip) return;
     grip.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
       e.preventDefault();
-      var r = host.getBoundingClientRect();
-      // Pin the top-left corner so dragging the bottom-right corner grows right/down.
-      host.style.left = r.left + 'px'; host.style.top = r.top + 'px';
-      host.style.right = 'auto'; host.style.bottom = 'auto';
-      var sx = e.clientX, sy = e.clientY, w0 = r.width, h0 = scroll.getBoundingClientRect().height, sz = null;
+      var sx = e.clientX, w0 = host.getBoundingClientRect().width, changed = false;
       try { grip.setPointerCapture(e.pointerId); } catch (err) {}
-      function move(ev) {
-        sz = { w: w0 + ev.clientX - sx, h: h0 + ev.clientY - sy };
-        sz.w = Math.min(sz.w, window.innerWidth - r.left - 4);
-        sz.h = Math.min(sz.h, window.innerHeight - r.top - (r.height - h0) - 4);
-        apply(sz);
-      }
+      function move(ev) { changed = true; apply(w0 + (sx - ev.clientX)); }
       function up() {
         grip.removeEventListener('pointermove', move);
         grip.removeEventListener('pointerup', up);
         grip.removeEventListener('pointercancel', up);
-        var nr = host.getBoundingClientRect();
-        // Re-anchor to the bottom-right so the panel stays put when the window is resized.
-        host.style.left = 'auto'; host.style.top = 'auto';
-        host.style.right = Math.max(0, window.innerWidth - nr.right) + 'px';
-        host.style.bottom = Math.max(0, window.innerHeight - nr.bottom) + 'px';
-        if (sz) GM_setValue('panelSize', { w: Math.round(host.getBoundingClientRect().width), h: Math.round(scroll.getBoundingClientRect().height) });
+        if (changed) GM_setValue('panelSize', { w: Math.round(host.getBoundingClientRect().width) });
       }
       grip.addEventListener('pointermove', move);
       grip.addEventListener('pointerup', up);
       grip.addEventListener('pointercancel', up);
     });
-    grip.addEventListener('dblclick', function () {
-      GM_setValue('panelSize', null); apply(null);
-      host.style.right = '20px'; host.style.bottom = '20px';
-    });
+    grip.addEventListener('dblclick', function () { GM_setValue('panelSize', null); apply(null); });
   })();
   $('clear').onclick = function () {
     if (!confirm('之前被审核跳过的商品会重新审核（会再用豆包），已同步到灵图的仍然不会重复。确定吗？')) return;
@@ -2774,7 +2707,7 @@ const COLLECTOR_BODY = String.raw`
     if (starting) return;
     var names = ids.map(function (id) { return siteLabel(siteBy(id)); }).join('、');
     if (getJob()) {
-      if (!confirm('当前有采集任务在进行。结束它，改为打开「' + names + '」并开始采集吗？')) { log('已勾选「' + names + '」，会在下次「开始多站点采集」时一起采'); return; }
+      if (!confirm('当前有采集任务在进行。结束它，改为打开「' + names + '」并开始采集吗？')) { log('已勾选「' + names + '」，会在下��「开始多站点采集」时一起采'); return; }
       running = false; queue.length = 0; setJob(null);
     }
     if (!preflight()) return;
@@ -2867,7 +2800,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.33.0',
+    '// @version      6.34.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
