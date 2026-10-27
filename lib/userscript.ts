@@ -214,7 +214,7 @@ const COLLECTOR_BODY = String.raw`
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
   var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]/i;
-  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|tr����ng|putih|branc[ao]/i;
+  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
     ['nera', 'bianca'], ['nero', 'bianco'], ['pretas', 'brancas'], ['pretos', 'brancos'], ['preta', 'branca'], ['preto', 'branco'],
@@ -1138,9 +1138,9 @@ const COLLECTOR_BODY = String.raw`
     var s = dayStats(d);
     return ['日期：' + d,
       '已采集并同步：' + s.saved + ' 张' + (cfg.dailyCap ? '（每日上限 ' + cfg.dailyCap + '）' : ''),
-      '去重拦截（没���灵豆）：' + s.dup + ' 张',
+      '去重拦截（没花灵豆）：' + s.dup + ' 张',
       '审核跳过：' + s.skipped + ' 张',
-      '失���：' + s.failed,
+      '失败：' + s.failed,
       '各站点：' + joinMap(s.sites),
       '跳过原因：' + joinMap(s.reasons),
       '去重库累计已同步：' + synced.size + ' 张'].join('\n');
@@ -1397,14 +1397,14 @@ const COLLECTOR_BODY = String.raw`
       if (isRetry) {
         if (retryClicks >= 2) {
           notify('「再试一次」加载失败', '脚本点击没反应。45 秒内你手动点一下即可；不点的话脚本会自动刷新页面接着采（已采的不会重复）。');
-          log('「再试一次」脚本点击无效，45 秒内可手动点一下；否则自动刷新页面��续（已采过的会跳过，不重复花灵豆）');
+          log('「再试一次」脚本点击无效，45 秒内可手动点一下；否则自动刷新页面继续（已采过的会跳过，不重复花灵豆）');
           if (await waitFor(function () { return productCount() > before; }, 45000)) { await sleep(1200); return true; }
           retryGaveUp = true;
           return false;
         }
         retryClicks++;
         var cool = retryClicks === 1 ? 2500 + Math.random() * 2000 : 12000 + Math.random() * 8000;
-        log('出现「' + label + '」，等 ' + Math.round(cool / 1000) + ' 秒后第 ' + retryClicks + ' 次模��人工点击');
+        log('出现「' + label + '」，等 ' + Math.round(cool / 1000) + ' 秒后第 ' + retryClicks + ' 次模拟人工点击');
         await sleep(cool);
         if (retryClicks >= 2) {
           try { scrollBy({ top: -(300 + Math.random() * 500), behavior: 'smooth' }); } catch (e) {}
@@ -1566,7 +1566,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.32.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.32.1';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -1841,7 +1841,7 @@ const COLLECTOR_BODY = String.raw`
           }
           notify('Temu 国家不对', '当前是「' + realName + '」站，需要切换到「' + wantName + '」');
           job.paused = true; t.tries = 0; t.navigated = false; setJob(job); running = false;
-          log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」。Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点��面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
+          log('当前 Temu 实际是「' + realName + '」站，不是你选的「' + wantName + '」。Temu 的国家记在账号/浏览器里，脚本改不了网址切换。请点页面顶部语言旁的「更改国家/地区」→ 选「' + wantName + '」，切好后点面板「继续」', true);
           render();
           return;
         }
@@ -1852,7 +1852,7 @@ const COLLECTOR_BODY = String.raw`
       if (!running) { job.paused = true; setJob(job); render(); return; }
       job.idx++; setJob(job); render();
     }
-    finishJob('全部��务完成');
+    finishJob('全部任务完成');
   }
   function finishJob(reason) {
     setJob(null); running = false; queue.length = 0;
@@ -2042,7 +2042,7 @@ const COLLECTOR_BODY = String.raw`
     var isStoreBox = function (el) { return STORE_BOX.test((el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.className || '')); };
     var inp = inStore ? (boxes.find(isStoreBox) || null) : boxes.find(function (el) { return !isStoreBox(el); });
     if (!inp && inStore) { log('店铺页没找到店内搜索框', true); return false; }
-    if (!inp) { log('页面上没找���搜索框', true); return false; }
+    if (!inp) { log('页面上没找到搜索框', true); return false; }
     // Events must be built with the page's own constructors, or the site's framework ignores them.
     var Ev = W.Event || Event, KEv = W.KeyboardEvent || KeyboardEvent, IEv = W.InputEvent || Ev;
     var setter = Object.getOwnPropertyDescriptor((W.HTMLInputElement || HTMLInputElement).prototype, 'value').set;
@@ -2250,7 +2250,7 @@ const COLLECTOR_BODY = String.raw`
   async function recommendSites() {
     var list = SITES.map(function (s) { return s.id + '=' + siteLabel(s); }).join('，');
     log('正在问豆包哪些平台和国家黑色印花 T 恤卖得好…');
-    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，���去销量高的平台和国家站点采集爆款图案。请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
+    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的平台和国家站点采集爆款图案。请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
     var ids = (r.sites || r.countries || []).map(function (x) { return String(x).toLowerCase(); });
     SITES.forEach(function (s) { cfg.sites[s.id].on = ids.indexOf(s.id) >= 0; });
     if (!ids.some(function (id) { return cfg.sites[id]; })) cfg.sites['temu-us'].on = true;
@@ -2313,7 +2313,7 @@ const COLLECTOR_BODY = String.raw`
           check('blackOnly', '只要指定颜色款（按下面的颜色模式过滤）') +
           field('颜色模式', '<select data-k="colorMode" style="' + inputCss + '"><option value="black">只采黑 T</option><option value="white">只采白 T</option><option value="rotate">轮换：先黑 T 再白 T</option></select>') +
           row(field('每站黑 T 采集（张）', input('blackCount', 'type="number" min="0"')), field('每站白 T 采集（张）', input('whiteCount', 'type="number" min="0"'))) +
-          hint('轮换模式：每个站点先用黑 T 关键词采够设定张数，再自动换成�� T 关键词（自动把 black/schwarz/noir/黑 等换成 white/weiß/blanc/白）。0 = 不限。') +
+          hint('轮换模式：每个站点先用黑 T 关键词采够设定张数，再自动换成白 T 关键词（自动把 black/schwarz/noir/黑 等换成 white/weiß/blanc/白）。0 = 不限。') +
           hint('Etsy / Amazon 卡片不显示销量，用评价数代替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。') +
         '</div>' +
         '<div data-pane="country" style="display:none">' +
@@ -2717,7 +2717,7 @@ const COLLECTOR_BODY = String.raw`
     starting = true; render();
     try {
       var tasks = await buildTasks(ids);
-      if (!tasks.length) { showTab('country'); log('「' + names + '」还没有关键词，请��填写或点「自动生成」', true); return; }
+      if (!tasks.length) { showTab('country'); log('「' + names + '」还没有关键词，请先填写或点「自动生成」', true); return; }
       log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个关键词');
       startJob(withUserFirst(tasks));
     } finally { starting = false; render(); }
@@ -2801,7 +2801,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.32.0',
+    '// @version      6.32.1',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
