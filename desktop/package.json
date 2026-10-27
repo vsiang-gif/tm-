@@ -1,0 +1,43 @@
+{
+  "name": "tm-collector",
+  "productName": "爆款图案采集器",
+  "version": "1.0.0",
+  "private": true,
+  "description": "爆款图案采集器 Windows 桌面版（需密钥）",
+  "main": "src/main.js",
+  "scripts": {
+    "build:script": "node scripts/build-script.mjs",
+    "start": "npm run build:script && electron .",
+    "dist": "npm run build:script && electron-builder --win --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.tm.collector",
+    "productName": "爆款图案采集器",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ]
+    },
+    "portable": {
+      "artifactName": "TM-Collector-${version}-portable.exe"
+    },
+    "nsis": {
+      "artifactName": "TM-Collector-${version}-setup.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "爆款图案采集器"
+    }
+  }
+}

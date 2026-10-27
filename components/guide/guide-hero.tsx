@@ -35,6 +35,14 @@ export function GuideHero() {
   >
   下载脚本文件
   </a>
+  <a
+  href="https://github.com/vsiang-gif/tm-/releases/tag/desktop-latest"
+  target="_blank"
+  rel="noopener"
+  className={buttonVariants({ size: 'lg', variant: 'outline' })}
+  >
+  下载 Windows 版（EXE）
+  </a>
   <a href="#steps" className={buttonVariants({ size: 'lg', variant: 'outline' })}>
             查看安装步骤
           </a>

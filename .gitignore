@@ -9,6 +9,10 @@ __v0_jsx-dev-runtime.ts
 # Environment variables
 .env*.local
 
+# Desktop app build output
+desktop/dist/
+desktop/src/generated/
+
 # Common ignores
 node_modules
 .next/
