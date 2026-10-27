@@ -215,6 +215,39 @@ const COLLECTOR_BODY = String.raw`
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
   var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]/i;
   var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
+  // Washed / acid-wash / garment-dyed tees: faded charcoal body, mottled texture, lighter collar and seams.
+  var WASH_RE = /水洗|做旧|酸洗|石洗|雪花洗|炒色|褪色|washed|acid\s*-?\s*wash|stone\s*-?\s*wash|snow\s*-?\s*wash|vintage\s*wash|garment\s*-?\s*dyed|pigment\s*-?\s*dyed|faded|distressed|gewaschen|délavé|delave|lavado|lavata|slavato|sprane|ウォッシュ|加工/i;
+  // Apparel categories. 纯棉T is the original black / white tee mode; the others are always black.
+  var CATS = {
+    cotton: {
+      name: '纯棉T', ai: '纯棉 T 恤', zh: '黑色/白色纯棉印花短袖 T 恤', tee: true,
+      look: '纯棉 T：面料颜色均匀、平整挺括，纯黑或纯白，没有褪色、斑驳或雪花纹理',
+      color: { black: ['black', 'jet black', 'all black', 'black graphic'], white: ['white', 'bright white', 'white graphic', 'off white'] },
+      garment: ['t shirt', 't-shirt', 'tee', 'graphic tee', 'crew neck tee', 'short sleeve tee', 'cotton tee', 'oversized tee', 'casual tee', 'summer tee'],
+      kws: { men: ['black graphic tee men'], women: ['black graphic tee women'] }
+    },
+    washed: {
+      name: '水洗T', ai: '水洗 T 恤', zh: '黑色水洗做旧印花短袖 T 恤', tee: true,
+      look: '水洗 T：经过水洗/酸洗/石洗/做旧处理，黑色发灰呈炭灰色、颜色不均匀，有斑驳雪花纹理，领口和缝线处偏白，常见复古恐怖片、骷髅、哥特、乐队、复古漫画大图印花',
+      color: { black: ['washed black', 'vintage black', 'faded black', 'black acid wash', 'charcoal'] },
+      garment: ['acid wash tee', 'washed t shirt', 'vintage wash tee', 'stone wash t-shirt', 'oversized washed tee', 'garment dyed tee', 'distressed tee', 'washed graphic tee'],
+      kws: { men: ['acid wash graphic tee men', 'vintage washed t shirt men'], women: ['acid wash graphic tee women', 'vintage washed oversized tee women'] }
+    },
+    vest: {
+      name: '马甲棉服', ai: '马甲棉服（无袖棉马甲/羽绒马甲）', zh: '黑色印花棉马甲（无袖棉服马甲）', tee: false,
+      look: '马甲棉服：无袖、有填充棉的绗缝/羽绒马甲，前面拉链或按扣',
+      color: { black: ['black', 'all black', 'matte black'] },
+      garment: ['puffer vest', 'padded vest', 'quilted vest', 'down vest', 'gilet', 'sleeveless puffer jacket', 'winter vest'],
+      kws: { men: ['black puffer vest men'], women: ['black puffer vest women'] }
+    },
+    puffer: {
+      name: '黑色棉服', ai: '黑色棉服（有袖棉衣/羽绒服外套）', zh: '黑色印花棉服外套（有袖棉衣/面包服）', tee: false,
+      look: '黑色棉服：有袖子、有填充棉的绗缝棉衣/面包服/羽绒服外套，衣服主体是黑色',
+      color: { black: ['black', 'all black', 'matte black'] },
+      garment: ['puffer jacket', 'padded jacket', 'quilted jacket', 'cotton padded coat', 'winter coat', 'down jacket', 'bubble jacket'],
+      kws: { men: ['black puffer jacket men'], women: ['black puffer jacket women'] }
+    }
+  };
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
     ['nera', 'bianca'], ['nero', 'bianco'], ['pretas', 'brancas'], ['pretos', 'brancos'], ['preta', 'branca'], ['preto', 'branco'],
@@ -235,7 +268,7 @@ const COLLECTOR_BODY = String.raw`
     storeMinSales: 500, userFirst: false, colorMode: 'black', blackCount: 30, whiteCount: 30, lightMin: 35,
     myKeywords: '', kwTranslate: true,
     kwRandCount: 10, kwRandColor: 'both', kwAutoRand: false, autoPick: true,
-    noPlain: true, printMin: 3, kwScope: 'temu-us'
+    noPlain: true, printMin: 3, kwScope: 'temu-us', category: 'cotton', grayMin: 40, catKws: {}
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
   if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel) || /seedance|seedream/i.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
@@ -244,6 +277,10 @@ const COLLECTOR_BODY = String.raw`
   if (cfg.v === 7) { cfg.v = 8; cfg.enterStore = false; }
   if (cfg.v === 8) { cfg.v = 9; cfg.enterStore = true; GM_setValue('cfg', cfg); }
   if (['black', 'white', 'rotate'].indexOf(cfg.colorMode) < 0) cfg.colorMode = 'black';
+  if (!CATS[cfg.category]) cfg.category = 'cotton';
+  cfg.catKws = Object.assign({}, cfg.catKws);
+  function cat() { return CATS[cfg.category] || CATS.cotton; }
+  function colorModeNow() { return cfg.category === 'cotton' ? cfg.colorMode : 'black'; }
   if (['alt1', 'click', 'mark'].indexOf(cfg.handoff) < 0) cfg.handoff = 'alt1';
   ['apiBase', 'appId', 'secret', 'crop', 'matting', 'dress', 'stanceId', 'backgroundId', 'dressAr', 'dressNum', 'lingtuTitle'].forEach(function (k) { delete cfg[k]; });
   var oldCountries = cfg.countries || {};
@@ -861,19 +898,21 @@ const COLLECTOR_BODY = String.raw`
     g.drawImage(bmp, 0, 0, W, H);
     var x0 = Math.round(W * 0.22), y0 = Math.round(H * 0.28), w = Math.round(W * 0.56), h = Math.round(H * 0.54);
     var shirt = shirtStats(g.getImageData(0, 0, W, H).data, W, H);
-    var dark, light, printRatio;
+    var dark, light, gray, printRatio;
     if (shirt) {
-      dark = shirt.dark; light = shirt.light; printRatio = shirt.print;
+      dark = shirt.dark; light = shirt.light; gray = shirt.gray; printRatio = shirt.print;
     } else {
       // Couldn't find the shirt body: fall back to the fixed chest box.
       var d = g.getImageData(x0, y0, w, h).data;
-      var nd = 0, nl = 0, n = 0;
+      var nd = 0, nl = 0, ng = 0, n = 0;
       for (var i = 0; i < d.length; i += 4) {
         var mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
         n++;
         if (mx < 75 && mx - mn < 45) nd++;
         else if (mn > 185 && mx - mn < 40) nl++;
+        if (mx < 135 && mx - mn < 45) ng++;
       }
+      gray = ng / n;
       var edges = 0, colored = 0, cells = 0;
       var lum = function (o) { return d[o] * 0.299 + d[o + 1] * 0.587 + d[o + 2] * 0.114; };
       for (var yy = 0; yy < h - 1; yy++) {
@@ -896,7 +935,7 @@ const COLLECTOR_BODY = String.raw`
     for (var b = 0; b < 64; b += 4) hex += parseInt(bits.substr(b, 4), 2).toString(16);
     var stairs = stackedShirts(g.getImageData(0, 0, W, H).data, W, H);
     return {
-      dark: dark, light: light, hash: hex, print: printRatio, shirt: !!shirt,
+      dark: dark, light: light, gray: gray, hash: hex, print: printRatio, shirt: !!shirt,
       sleeve: shirt ? shirt.sleeve : 0, multiColor: shirt ? shirt.multiColor : 0, stairs: stairs
     };
   }
@@ -970,7 +1009,7 @@ const COLLECTOR_BODY = String.raw`
     if (thi - tlo < W * 0.2) { tlo = 0; thi = W - 1; }
     var tm = Math.round((thi - tlo) * 0.06), sleeveTo = Math.round(top + (bot - top) * 0.45);
     function skin(o) { var r0 = px[o], g0 = px[o + 1], b0 = px[o + 2]; return r0 > 95 && r0 > g0 && g0 > b0 && r0 - b0 > 25 && r0 - b0 < 140; }
-    var tot = 0, nd = 0, nl = 0, off = 0, edges = 0, sTot = 0, sPrint = 0, fg = 0, other = 0;
+    var tot = 0, nd = 0, nl = 0, ng = 0, off = 0, edges = 0, sTot = 0, sPrint = 0, fg = 0, other = 0;
     for (y = top; y <= bot; y++) {
       var r = rows[y]; if (!r) continue;
       var span = r.hi - r.lo, il = Math.max(r.lo + Math.round(span * 0.12), Math.round(W * 0.18), tlo + tm), ir = Math.min(r.hi - Math.round(span * 0.12), Math.round(W * 0.82), thi - tm);
@@ -987,6 +1026,7 @@ const COLLECTOR_BODY = String.raw`
         if (x >= il && x < ir) {
           tot++;
           if (mx < 75 && mx - mn < 45) nd++; else if (mn > 185 && mx - mn < 40) nl++;
+          if (mx < 135 && mx - mn < 45) ng++;
           if (!body && enclosed(x, y)) off++;
           if ((eR || eD) && enclosed(x, y)) edges++;
         } else if (y <= sleeveTo && x >= r.lo && x <= r.hi && (x < tlo || x > thi)) {
@@ -998,7 +1038,7 @@ const COLLECTOR_BODY = String.raw`
     }
     if (tot < 300) return null;
     return {
-      dark: nd / tot, light: nl / tot, print: Math.max(edges / tot, off / tot),
+      dark: nd / tot, light: nl / tot, gray: ng / tot, print: Math.max(edges / tot, off / tot),
       sleeve: sTot >= 80 ? sPrint / sTot : 0,
       multiColor: bgInfo.share >= 0.15 && fg > 0 ? other / fg : 0
     };
@@ -1065,14 +1105,20 @@ const COLLECTOR_BODY = String.raw`
     return null;
   }
   async function aiCheck(item) {
-    var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件 T 恤的印花图案。商品标题：' + item.title +
-      '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件 T 恤本身，裤子和配饰的颜色、图案一律忽略。只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满（含满身波点、豹纹、星星等小碎花纹）,"multiple":主图里是否出现 2 件或以上衣服（多件装、叠放、多个模特穿不同衣服）,"sleevePrint":袖子或袖口上是否有印花/图案/字母,"plain":是否纯色素面没有任何印花图案,"notColor":衣服主体是否不是' + colorName(item.ctx) + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
+    var c = cat();
+    var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件' + c.ai + '的印花图案。商品标题：' + item.title +
+      '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件衣服本身，裤子和配饰的颜色、图案一律忽略。' +
+      '\n品类区分：' + CATS.washed.look + '；' + CATS.cotton.look + '。' + (c.tee ? '' : '本次要的品类是 ' + c.look + '。') +
+      '\n只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满（含满身波点、豹纹、星星等小碎花纹）,"multiple":主图里是否出现 2 件或以上衣服（多件装、叠放、多个模特穿不同衣服）,"sleevePrint":袖子或袖口上是否有印花/图案/字母,"plain":是否纯色素面没有任何印花图案,"notColor":衣服主体是否不是' + colorName(item.ctx) + ',"washed":是否是水洗/做旧/酸洗面料（炭灰褪色、斑驳雪花纹理）,"wrongType":这件衣服是否不是' + c.ai + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
     var content = cfg.aiVision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: item.imageUrl } }]
       : prompt;
     var r = await doubao(content);
     var bad = r.violation ? '违规内容' : r.ipRisk ? 'IP/品牌侵权风险' : null;
-    if (!bad && cfg.aiVision) bad = (cfg.noPlain && r.plain) ? '纯色无图案' : r.multiple ? '多件衣服的主图' : r.sleevePrint ? '袖子有印花' : r.doubleSided ? '双面印花' : r.fullPrint ? '印花太满' : (cfg.blackOnly && (r.notColor || r.notBlack)) ? '不是' + colorName(item.ctx) : null;
+    if (!bad && r.wrongType) bad = '品类不对，不是' + c.name;
+    if (!bad && cfg.category === 'cotton' && r.washed && cfg.aiVision) bad = '是水洗T，不是纯棉T';
+    if (!bad && cfg.category === 'washed' && r.washed === false && cfg.aiVision && !WASH_RE.test(item.title)) bad = '不是水洗T（面料颜色均匀，像纯棉T）';
+    if (!bad && cfg.aiVision) bad = (cfg.noPlain && c.tee && r.plain) ? '纯色无图案' : r.multiple ? '多件衣服的主图' : (c.tee && r.sleevePrint) ? '袖子有印花' : r.doubleSided ? '双面印花' : r.fullPrint ? '印花太满' : (cfg.blackOnly && (r.notColor || r.notBlack)) ? '不是' + colorName(item.ctx) : null;
     return bad ? bad + (r.reason ? '：' + r.reason : '') : null;
   }
 
@@ -1120,7 +1166,7 @@ const COLLECTOR_BODY = String.raw`
   function dayStats(d) { return GM_getValue('daily', {})[d || today()] || emptyDay(); }
   function reasonGroup(r) {
     r = String(r || '');
-    return /违规/.test(r) ? '违规内容' : /IP|品牌/.test(r) ? 'IP/品牌' : /双面/.test(r) ? '双面印花' : /太满/.test(r) ? '印花太满' : /黑色|颜色/.test(r) ? '非黑色' : /标题含/.test(r) ? '跳过词' : '其他';
+    return /违规/.test(r) ? '违规内容' : /IP|品牌/.test(r) ? 'IP/品牌' : /双面/.test(r) ? '双面印花' : /太满/.test(r) ? '印花太满' : /品类|水洗|纯棉/.test(r) ? '品类不对' : /黑色|颜色/.test(r) ? '非黑色' : /标题含/.test(r) ? '跳过词' : '其他';
   }
   function bump(kind, site, reason) {
     var all = GM_getValue('daily', {}), d = today(), s = Object.assign(emptyDay(), all[d]);
@@ -1228,14 +1274,18 @@ const COLLECTOR_BODY = String.raw`
     }
     var twin = info && cfg.imgDedupe ? similarSynced(info.hash) : null;
     if (twin) { markDup(item, '图案和已同步的 ' + twin.k + ' 几乎一样'); return false; }
+    // Pixel heuristics were tuned on tees; jackets/vests have quilting seams and no sleeves to measure.
+    var tee = cat().tee;
     if (info && cfg.noPlain && info.stairs >= 3) { markSkipped(item, '多件衣服叠放的主图（' + info.stairs + ' 层）'); return false; }
-    if (info && cfg.noPlain && info.multiColor >= 0.22) { markSkipped(item, '多件不同颜色衣服的主图（另一件占 ' + Math.round(info.multiColor * 100) + '%）'); return false; }
-    if (info && cfg.noPlain && info.sleeve >= 0.06) { markSkipped(item, '袖子有印花（袖子印花占比 ' + (info.sleeve * 100).toFixed(1) + '%）'); return false; }
-    if (info && cfg.noPlain && info.print < cfg.printMin / 100) {
+    if (info && cfg.noPlain && tee && info.multiColor >= 0.22) { markSkipped(item, '多件不同颜色衣服的主图（另一件占 ' + Math.round(info.multiColor * 100) + '%）'); return false; }
+    if (info && cfg.noPlain && tee && info.sleeve >= 0.06) { markSkipped(item, '袖子有印花（袖子印花占比 ' + (info.sleeve * 100).toFixed(1) + '%）'); return false; }
+    if (info && cfg.noPlain && tee && info.print < cfg.printMin / 100) {
       markSkipped(item, '纯色无图案（印花占比 ' + (info.print * 100).toFixed(1) + '%）'); return false;
     }
     if (info && cfg.blackOnly && cfg.pixelCheck) {
-      if (colorOf(ctx) === 'white') {
+      if (cfg.category === 'washed') {
+        if ((info.gray || 0) < cfg.grayMin / 100) { markSkipped(item, '非水洗黑/炭灰或印花太满（炭灰占比 ' + Math.round((info.gray || 0) * 100) + '%）'); return false; }
+      } else if (colorOf(ctx) === 'white') {
         if (info.light < cfg.lightMin / 100) { markSkipped(item, '非白色或印花太满（白色占比 ' + Math.round(info.light * 100) + '%）'); return false; }
       } else if (info.dark < cfg.darkMin / 100) { markSkipped(item, '非黑色或印花太满（黑色占比 ' + Math.round(info.dark * 100) + '%）'); return false; }
     }
@@ -1326,6 +1376,7 @@ const COLLECTOR_BODY = String.raw`
       if (st && st.type === 'store' && st.keyword && !titleMatchesKeyword(x.title, st.keyword)) {
         stats.skipped++; markCard(x.el, 'warn', '不采：与「' + st.keyword.slice(0, 20) + '」无关'); return;
       }
+      if (cfg.category === 'cotton' && WASH_RE.test(x.title)) { stats.skipped++; markCard(x.el, 'warn', '不采：标题是水洗T，当前品类是纯棉T'); return; }
       var cre = colorOf(ctx) === 'white' ? WHITE_RE : BLACK_RE;
       if (cfg.blackOnly && !cfg.pixelCheck && !cre.test(x.title)) return;
       x.ctx = ctx;
@@ -1566,12 +1617,12 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.32.1';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.33.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
   function taskLabel(t) {
-    if (t.type === 'search') return siteLabel(siteBy(t.site)) + (t.resumed ? ' 退出店铺，回到搜索' : t.user ? ' 你搜的' : ' 搜索') + '「' + t.keyword + '」' + (cfg.colorMode !== 'black' && t.color ? '（' + (t.color === 'white' ? '白T' : '黑T') + '）' : '');
+    if (t.type === 'search') return siteLabel(siteBy(t.site)) + (t.resumed ? ' 退出店铺，回到搜索' : t.user ? ' 你搜的' : ' 搜索') + '「' + t.keyword + '」' + (colorModeNow() !== 'black' && t.color ? '（' + (t.color === 'white' ? '白T' : '黑T') + '）' : '');
     if (t.type === 'goods') return PNAMES[siteBy(t.site).p] + ' 商品 ' + t.goodsId + ' → 找店铺';
     if (t.type === 'store') return PNAMES[siteBy(t.site).p] + ' 店铺 ' + t.storeId + (t.keyword ? ' 内搜索「' + t.keyword + '」' : '');
     return '当前页';
@@ -1620,7 +1671,7 @@ const COLLECTOR_BODY = String.raw`
     if (t.type === 'goods') {
       var soldOut = function () {
         var txt = ((document.body && document.body.innerText) || '').slice(0, 4000);
-        return /此商品已售罄|商品已下架|已售罄|This item is sold out|Sold out|no longer available|Ausverkauft|Épuisé|Esaurito|Agotado|Esgotado|売り切れ/i.test(txt);
+        return /此商品已售罄|商品��下架|已售罄|This item is sold out|Sold out|no longer available|Ausverkauft|Épuisé|Esaurito|Agotado|Esgotado|売り切れ/i.test(txt);
       };
       await waitFor(function () { return findStoreLink() || soldOut(); }, 15000);
       if (soldOut()) { log('商品 ' + t.goodsId + ' 已售罄/下架，跳过进店'); ensureReturn(t, job); return; }
@@ -1794,7 +1845,7 @@ const COLLECTOR_BODY = String.raw`
       var t = job.tasks[job.idx];
       if (capReached()) { finishJob('今日已同步 ' + dayStats().saved + ' 张，达到每日上限 ' + cfg.dailyCap); return; }
       if (t.type !== 'store' && colorLeft(job, t) <= 0) {
-        log(siteLabel(siteBy(t.site)) + ' ' + colorName(t) + 'T 已采够「T 恤颜色 → 每站' + (t.color === 'white' ? '白' : '黑') + ' T 采集」设定的 ' + (t.color === 'white' ? cfg.whiteCount : cfg.blackCount) + ' 张（填 0 = 不限），跳过「' + taskLabel(t) + '」');
+        log(siteLabel(siteBy(t.site)) + ' ' + colorName(t) + 'T 已采够「服饰品类 → 每站' + (t.color === 'white' ? '白' : '黑') + ' T 采集」设定的 ' + (t.color === 'white' ? cfg.whiteCount : cfg.blackCount) + ' 张（填 0 = 不限），跳过「' + taskLabel(t) + '」');
         job.idx++; setJob(job); continue;
       }
       // Temu keyword searches start from the site's home page search box, never from inside a store.
@@ -1884,11 +1935,11 @@ const COLLECTOR_BODY = String.raw`
     return out;
   }
   // ---------- color phases: black only / white only / black N then white N per site ----------
-  function colorOf(ctx) { return (ctx && ctx.color) || (cfg.colorMode === 'white' ? 'white' : 'black'); }
-  function colorName(x) { return colorOf(x) === 'white' ? '白色' : '黑色'; }
+  function colorOf(ctx) { return cfg.category !== 'cotton' ? 'black' : (ctx && ctx.color) || (cfg.colorMode === 'white' ? 'white' : 'black'); }
+  function colorName(x) { return cfg.category === 'washed' ? '水洗黑/炭灰色' : colorOf(x) === 'white' ? '白色' : '黑色'; }
   function colorKey(t) { return t && t.site && t.color ? t.site + ':' + t.color : ''; }
   function colorLeft(job, t) {
-    if (cfg.colorMode !== 'rotate' || !t.color || !job) return Infinity;
+    if (colorModeNow() !== 'rotate' || !t.color || !job) return Infinity;
     var limit = t.color === 'white' ? cfg.whiteCount : cfg.blackCount;
     if (!limit) return Infinity;
     return limit - ((job.colorSaved || {})[colorKey(t)] || 0);
@@ -1946,7 +1997,7 @@ const COLLECTOR_BODY = String.raw`
     if (!cfg.arkKey) { log('没填豆包 API Key，关键词不会自动翻译，外语站点会直接用原词搜索', true); return out; }
     log('正在用豆包把 ' + miss.length + ' 个关键词翻译成各站点语言…');
     try {
-      var r = await doubao('把下面的电商搜索关键词翻译成指定语言。要求：译成当地买家在 Temu / Amazon 搜索框里真实会输入的简短说法，保留颜色、印花/图案、T 恤、男女含义；不要加品牌、引号、解释；已经是该语言的原样返回。\n' +
+      var r = await doubao('把下面的电商搜索关键词翻译成指定语言。要求：译成当地买家在 Temu / Amazon 搜索框里真实会输入的简短说法，保留颜色、印花/图案、服饰品类（T 恤 / 水洗做旧 T 恤 / 棉马甲 / 棉服外套）、男女含义，水洗/acid wash 不能译成普通 T 恤；不要加品牌、引号、解释；已经是该语言的原样返回。\n' +
         miss.map(function (p, i) { return i + '. [' + p.lang + '] ' + p.kw; }).join('\n') +
         '\n只返回 JSON：{"items":[{"i":序号,"t":"译文"}]}');
       (r.items || []).forEach(function (it) {
@@ -1962,12 +2013,17 @@ const COLLECTOR_BODY = String.raw`
   function platOf(scope) { return PNAMES[scope] ? scope : siteBy(scope).p; }
   function platSites(p) { return SITES.filter(function (s) { return s.p === p; }); }
   function platList() { return Object.keys(PNAMES).filter(function (p) { return platSites(p).length; }); }
-  function getScopeKws(scope) { return cfg.platKws[platOf(scope)] || ''; }
+  // 纯棉T keeps the original per-platform lists; every other category has its own lists.
+  function kwStore() { return cfg.category === 'cotton' ? cfg.platKws : (cfg.catKws[cfg.category] = cfg.catKws[cfg.category] || {}); }
+  function getScopeKws(scope) { return kwStore()[platOf(scope)] || ''; }
   function setScopeKws(scope, text) {
-    cfg.platKws[platOf(scope)] = splitKeywords(text).join('\n');
+    kwStore()[platOf(scope)] = splitKeywords(text).join('\n');
     save(); refreshKwBox();
   }
-  function builtinKws(id) { var s = PNAMES[id] ? platSites(id)[0] : siteBy(id); return splitKeywords(s[cfg.gender] || s.men); }
+  function builtinKws(id) {
+    if (cfg.category !== 'cotton') return cat().kws[cfg.gender === 'women' ? 'women' : 'men'].slice();
+    var s = PNAMES[id] ? platSites(id)[0] : siteBy(id); return splitKeywords(s[cfg.gender] || s.men);
+  }
   function siteKws(id) { var own = splitKeywords(getScopeKws(id)); return own.length ? own : builtinKws(id); }
   function refreshKwBox() {
     var box = typeof host !== 'undefined' && host ? $('myKeywords') : null;
@@ -1995,7 +2051,7 @@ const COLLECTOR_BODY = String.raw`
   async function buildTasks(only) {
     var on = SITES.filter(function (s) { return (only ? only.indexOf(s.id) >= 0 : cfg.sites[s.id].on) && siteKws(s.id).length; });
     if (!on.length) return [];
-    var colors = cfg.colorMode === 'rotate' ? ['black', 'white'] : [cfg.colorMode === 'white' ? 'white' : 'black'];
+    var cm = colorModeNow(), colors = cm === 'rotate' ? ['black', 'white'] : [cm === 'white' ? 'white' : 'black'];
     var srcOf = {};
     on.forEach(function (s) {
       var kws = siteKws(s.id);
@@ -2117,7 +2173,7 @@ const COLLECTOR_BODY = String.raw`
     var kw = cfg.userFirst ? currentKeyword() : '';
     if (!kw) return tasks;
     var sid = currentSite().id;
-    var color = WHITE_RE.test(kw) ? 'white' : BLACK_RE.test(kw) ? 'black' : (cfg.colorMode === 'white' ? 'white' : 'black');
+    var color = cfg.category !== 'cotton' ? 'black' : WHITE_RE.test(kw) ? 'white' : BLACK_RE.test(kw) ? 'black' : (cfg.colorMode === 'white' ? 'white' : 'black');
     var low = kw.toLowerCase();
     tasks = tasks.filter(function (t) { return !(t.site === sid && String(t.keyword).toLowerCase() === low); });
     tasks.unshift({ type: 'search', site: sid, keyword: kw, color: color, user: true, navigated: false });
@@ -2133,8 +2189,8 @@ const COLLECTOR_BODY = String.raw`
   async function genKeywords() {
     var men = cfg.gender === 'men', scope = platOf(cfg.kwScope), pname = PNAMES[scope], have = siteKws(scope);
     log('正在让豆包为 ' + pname + ' 想更多关键词（搜索时会自动翻译成各国语言）…');
-    var r = await doubao('我做跨境电商，在 ' + pname + ' 上要搜索' + (men ? '男士' : '女士') + '黑色印花短袖 T 恤的爆款图案。我已有这些关键词：' + have.join('；') +
-      '。请再给 5 个买家真实会在搜索框输入的英文关键词，彼此说法不同，都要表达「黑色 + 印花/图案 + 短袖 T 恤 + ' + (men ? '男' : '女') + '」，必须带具体图案主题，不要纯色/素色/plain/solid/blank，不要品牌、IP、长袖、卫衣、儿童。只返回 JSON：{"keywords":["..."]}');
+    var r = await doubao('我做跨境电商，在 ' + pname + ' 上要搜索' + (men ? '男士' : '女士') + cat().zh + '的爆款图案。我已有这些关键词：' + have.join('；') +
+      '。请再给 5 个买家真实会在搜索框输入的英文关键词，彼此说法不同，都要表达「' + cat().zh + ' + ' + (men ? '男' : '女') + '」，必须带具体图案主题，不要纯色/素色/plain/solid/blank，不要品牌、IP、儿童' + (cat().tee ? '、长袖、卫衣' : '') + (cfg.category === 'cotton' ? '、水洗/acid wash/vintage wash' : '') + '。只返回 JSON：{"keywords":["..."]}');
     var list = splitKeywords(have.concat(r.keywords || []).join('\n'));
     setScopeKws(scope, list.join('\n'));
     log(pname + ' 关键词共 ' + list.length + ' 个');
@@ -2171,9 +2227,9 @@ const COLLECTOR_BODY = String.raw`
     hist.forEach(function (k) { seen[k] = 1; });
     splitKeywords(getScopeKws(cfg.kwScope)).forEach(function (k) { seen[kwKey(k)] = 1; });
     for (var tries = 0; out.length < n && tries < n * 80; tries++) {
-      var color = colorPref === 'both' ? (out.length % 2 ? 'white' : 'black') : colorPref;
+      var c = cat(), color = !c.color.white ? 'black' : colorPref === 'both' ? (out.length % 2 ? 'white' : 'black') : colorPref;
       var parts = {
-        color: pick(KW_PARTS[color]), garment: pick(KW_PARTS.garment), style: pick(KW_PARTS.style),
+        color: pick(c.color[color]), garment: pick(c.garment), style: pick(KW_PARTS.style),
         theme: pick(KW_PARTS.theme), gender: pick(KW_PARTS[gender === 'women' ? 'women' : 'men'])
       };
       if (/graphic|print/.test(parts.garment) || /print|letter|word art|line art/.test(parts.theme)) parts.style = '';
@@ -2309,9 +2365,11 @@ const COLLECTOR_BODY = String.raw`
           check('userFirst', '把我当前搜索框里的关键词排在第一个（也会先重新搜索再采）') +
           check('enterStore', '高销量商品自动进店铺采集，采完退出店铺继续') +
           row(field('进店销量门槛（≥）', input('storeMinSales', 'type="number" min="0"')), '<span style="flex:1"></span>') +
-          '<div style="border-top:1px solid ' + C.line + ';margin:6px 0;padding-top:6px"><strong>T 恤颜色</strong></div>' +
-          check('blackOnly', '只要指定颜色款（按下面的颜色模式过滤）') +
-          field('颜色模式', '<select data-k="colorMode" style="' + inputCss + '"><option value="black">只采黑 T</option><option value="white">只采白 T</option><option value="rotate">轮换：先黑 T 再白 T</option></select>') +
+          '<div style="border-top:1px solid ' + C.line + ';margin:6px 0;padding-top:6px"><strong>服饰品类</strong></div>' +
+          field('品类', '<select data-k="category" style="' + inputCss + '">' + Object.keys(CATS).map(function (k) { return '<option value="' + k + '">' + CATS[k].name + '</option>'; }).join('') + '</select>') +
+          '<div data-k="catInfo" style="font-size:11px;color:' + C.dim + ';margin:-4px 0 8px"></div>' +
+          check('blackOnly', '只要指定颜色款（按品类 / 颜色模式过滤）') +
+          field('颜色模式（仅纯棉T）', '<select data-k="colorMode" style="' + inputCss + '"><option value="black">只采黑 T</option><option value="white">只采白 T</option><option value="rotate">轮换：先黑 T 再白 T</option></select>') +
           row(field('每站黑 T 采集（张）', input('blackCount', 'type="number" min="0"')), field('每站白 T 采集（张）', input('whiteCount', 'type="number" min="0"'))) +
           hint('轮换模式：每个站点先用黑 T 关键词采够设定张数，再自动换成白 T 关键词（自动把 black/schwarz/noir/黑 等换成 white/weiß/blanc/白）。0 = 不限。') +
           hint('Etsy / Amazon 卡片不显示销量，用评价数代替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。') +
@@ -2329,7 +2387,7 @@ const COLLECTOR_BODY = String.raw`
             '<input data-k="kwRandCount" type="number" min="1" max="100" style="' + inputCss + ';width:64px" aria-label="生成个数">' +
             '<button data-k="randKw" style="' + btnCss + '">随机生成</button>' +
           '</div>' +
-          check('kwAutoRand', '每次「开始多站点采集」前自动追加一批新随机词') +
+          check('kwAutoRand', '每次「开始多站点采集」前自动追加一��新随机词') +
           check('autoPick', '勾选站点后自动打开该站并输入关键词开始采集') +
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span data-k="kwHistInfo" style="font-size:11px;opacity:.7"></span><button data-k="clearKwHist" style="' + linkCss + ';font-size:11px">清空生成记录</button></div>' +
           hint('随机词在本地组合（颜色 + 主题 + 印花 + T 恤 + 男女），不花灵豆也不花豆包费用；所有生成过的词都会记录，词序不同也算重复，永远不会再生成同一个词。') +
@@ -2663,6 +2721,14 @@ const COLLECTOR_BODY = String.raw`
   $('report').onclick = exportReport;
   $('genKw').onclick = function () { genKeywords().catch(function (e) { log(e.message, true); }); };
   function kwHistInfo() { $('kwHistInfo').textContent = '已生成过 ' + GM_getValue('kwHistory', []).length + ' 个词'; }
+  function refreshCat() {
+    var cotton = cfg.category === 'cotton';
+    $('catInfo').textContent = cat().look + (cotton ? '。标题带「水洗/acid wash/做旧」的会跳过。' : '。只采黑色，关键词单独一份，和纯棉T互不影响。');
+    ['colorMode', 'blackCount', 'whiteCount', 'kwRandColor'].forEach(function (k) { $(k).disabled = !cotton; });
+  }
+  $('category').value = cfg.category;
+  $('category').onchange = function () { cfg.category = $('category').value; save(); refreshCat(); refreshKwBox(); log('品类切换为「' + cat().name + '」'); };
+  refreshCat();
   $('kwRandColor').value = cfg.kwRandColor || 'both';
   $('kwRandColor').onchange = function () { cfg.kwRandColor = $('kwRandColor').value; save(); };
   $('kwRandCount').value = cfg.kwRandCount || 10;
@@ -2801,7 +2867,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.32.1',
+    '// @version      6.33.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
