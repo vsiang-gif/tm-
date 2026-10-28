@@ -72,6 +72,11 @@ const GROUPS = [
     fields: [
       chk('noPlain', true, '不采纯色款（纯黑 / 纯白 / 素色），必须有印花图案'),
       row(num('printMin', 3, '印花占比下限 %（低于算纯色）', { max: 100 }), null),
+      head('印花数量（可多选）'),
+      chk('printOne', true, '单个印花（只有前面或只有后面一个印花）'),
+      chk('printTwo', false, '两个印花（前 + 后，或 一面 + 袖子）'),
+      chk('printMulti', false, '多印花（3 个及以上，如后背 + 左右袖）'),
+      hint('正面、背面、左袖、右袖各算一个印花面，用豆包看图判断（需开启「审核时看图」）。都不勾 = 不限。勾了两个或多印花时，标题里的「双面 / 前后印花」不再当跳过词。'),
       chk('pixelCheck', true, '检测图片：颜色不对 / 印花太满的不要'),
       row(num('darkMin', 30, '黑色占比下限 %', { max: 100 }), num('lightMin', 35, '白色占比下限 %', { max: 100 })),
       { k: 'skipWords', t: 'textarea', d: '', label: '跳过词（标题出现就不采）' },

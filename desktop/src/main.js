@@ -462,7 +462,7 @@ ipcMain.on('ui:platforms', (e) => {
 
 const CFG_KEYS = new Set([
   'useAi', 'arkKey', 'arkModel', 'aiCheck', 'aiVision', 'handoff', 'clickGap', 'saveOriginal',
-  'gender', 'colorMode', 'minSales', 'target', 'maxPages', 'pixelCheck', 'darkMin', 'lightMin', 'noPlain', 'printMin',
+  'gender', 'colorMode', 'minSales', 'target', 'maxPages', 'pixelCheck', 'darkMin', 'lightMin', 'noPlain', 'printMin', 'printOne', 'printTwo', 'printMulti',
   'enterStore', 'storeCount', 'storeTarget', 'storeMinSales', 'schedule', 'dailyCap', 'reportTime', 'restEvery',
   'restMin', 'autoResume', 'beep', 'pushType', 'pushKey', 'imgDedupe',
   'userFirst', 'category', 'blackOnly', 'blackCount', 'whiteCount', 'kwScope', 'kwTranslate',
