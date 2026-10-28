@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, session, Notification, Menu, dialog, net, safeStorage } = require('electron')
+const { app, BrowserWindow, WebContentsView, ipcMain, session, Notification, Menu, dialog, net, safeStorage } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -218,11 +218,80 @@ function wireSiteWindow(win) {
     return { action: 'allow', overrideBrowserWindowOptions: { width: 1400, height: 900, webPreferences: sitePrefs() } }
   })
   win.webContents.on('did-create-window', wireSiteWindow)
+  const siteId = win.webContents.id
   win.webContents.on('destroyed', () => {
-    tokens.delete(win.webContents.id)
-    menuCommands.delete(win.webContents.id)
+    tokens.delete(siteId)
+    menuCommands.delete(siteId)
+    panels.delete(siteId)
+  })
+  attachPanel(win)
+}
+
+// The collector panel is a native view docked on the right of each site window; the page no longer shows it.
+const PANEL_WIDTH = 360
+const PANEL_COLLAPSED_HEIGHT = 46
+const panels = new Map()
+const panelOwners = new Map()
+
+function attachPanel(win) {
+  const view = new WebContentsView({
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(__dirname, 'preload-panel.js') },
+  })
+  view.setBackgroundColor('#161616')
+  view.setVisible(false)
+  win.contentView.addChildView(view)
+  view.webContents.loadFile(path.join(__dirname, 'panel.html'))
+  const site = win.webContents
+  const state = { view, win, collapsed: false, ready: false }
+  panels.set(site.id, state)
+  panelOwners.set(view.webContents.id, site)
+
+  const layout = () => {
+    if (win.isDestroyed()) return
+    const [w, h] = win.getContentSize()
+    const width = Math.min(PANEL_WIDTH, w)
+    view.setBounds({ x: w - width, y: 0, width, height: state.collapsed ? Math.min(PANEL_COLLAPSED_HEIGHT, h) : h })
+  }
+  state.layout = layout
+  layout()
+  win.on('resize', layout)
+  view.webContents.once('did-finish-load', () => (state.ready = true))
+  site.on('did-start-navigation', (details) => {
+    const isMain = details && typeof details === 'object' ? details.isMainFrame && !details.isSameDocument : true
+    if (!isMain) return
+    view.setVisible(false)
+    if (state.ready) view.webContents.send('panel:reset')
+  })
+  win.on('closed', () => {
+    panelOwners.delete(view.webContents.id)
+    if (!view.webContents.isDestroyed()) view.webContents.close()
   })
 }
+
+ipcMain.on('gm:panel-push', (e, token, snap) => {
+  if (!checkToken(e, token) || typeof snap !== 'string') return
+  const state = panels.get(e.sender.id)
+  if (!state || state.win.isDestroyed()) return
+  state.view.webContents.send('panel:snapshot', snap)
+  if (!state.view.getVisible()) {
+    state.view.setVisible(true)
+    state.layout()
+  }
+})
+
+ipcMain.on('panel:act', (e, msg) => {
+  const site = panelOwners.get(e.sender.id)
+  if (!unlocked || !site || site.isDestroyed() || !tokens.has(site.id) || !msg || typeof msg !== 'object') return
+  site.send('gm:panel-act', msg)
+})
+
+ipcMain.on('panel:collapse', (e, on) => {
+  const site = panelOwners.get(e.sender.id)
+  const state = site && panels.get(site.id)
+  if (!state) return
+  state.collapsed = !!on
+  state.layout()
+})
 
 function openSite(url) {
   const win = new BrowserWindow({ width: 1400, height: 900, backgroundColor: '#ffffff', webPreferences: sitePrefs() })

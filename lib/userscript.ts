@@ -2322,7 +2322,7 @@ const COLLECTOR_BODY = String.raw`
     var head = ['状态', '原因/备注', '平台站点', '来源', '商品ID', '原标题', '清洗后标题', '销量', '销量数值', '商品链接', '图片链接', '文件', '时间'];
     var rows = [head.join(',')].concat(records.map(function (r) { return cols.map(function (k) { return '"' + String(r[k] == null ? '' : r[k]).replace(/"/g, '""') + '"'; }).join(','); }));
     var url = URL.createObjectURL(new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv' }));
-    GM_download({ url: url, name: '爆款图案/采集记录_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
+    GM_download({ url: url, name: '爆款图案/���集记录_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
   }
 
   // ---------- panel ----------
@@ -2721,7 +2721,7 @@ const COLLECTOR_BODY = String.raw`
     try {
       var tasks = await buildTasks(ids);
       if (!tasks.length) { showTab('country'); log('「' + names + '」还没有关键词，请先填写或点「自动生成」', true); return; }
-      log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个关键词');
+      log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个关键���');
       startJob(withUserFirst(tasks));
     } finally { starting = false; render(); }
   }
@@ -2776,6 +2776,47 @@ const COLLECTOR_BODY = String.raw`
   render();
   log('就绪 v' + SCRIPT_VERSION + (cfg.useAi ? '' : ' · 豆包已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
+
+  // Desktop app: the panel is rendered natively by the exe, so keep it off-page and mirror it over IPC.
+  if (typeof TM_panelPush === 'function' && typeof TM_onPanelAct === 'function') {
+    host.style.setProperty('left', '-100000px', 'important');
+    host.style.setProperty('right', 'auto', 'important');
+    host.style.setProperty('visibility', 'hidden', 'important');
+    host.style.setProperty('pointer-events', 'none', 'important');
+    var lastPanelSnap = '';
+    var panelControls = function () { return host.querySelectorAll('input,select,textarea'); };
+    var pushPanel = function () {
+      var vals = Array.prototype.map.call(panelControls(), function (el) { return [el.type === 'file' ? '' : el.value, !!el.checked]; });
+      var snap = JSON.stringify({ style: host.getAttribute('style'), html: host.innerHTML, vals: vals });
+      if (snap !== lastPanelSnap) { lastPanelSnap = snap; TM_panelPush(snap); }
+    };
+    var resolvePanelPath = function (path) {
+      var el = host;
+      for (var i = 0; el && i < path.length; i++) el = el.children[path[i]];
+      return el;
+    };
+    TM_onPanelAct(function (m) {
+      try {
+        if (m.t === 'click') { var b = resolvePanelPath(m.path || []); if (b && b.click) b.click(); }
+        else if (m.t === 'toggle') { var d = resolvePanelPath(m.path || []); if (d) d.open = !!m.open; }
+        else if (m.t === 'set' || m.t === 'file') {
+          var el = panelControls()[m.i];
+          if (!el) return;
+          if (m.t === 'file') {
+            var dt = new DataTransfer();
+            dt.items.add(new File([m.text], m.name || 'import.json', { type: 'application/json' }));
+            el.files = dt.files;
+          } else if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!m.c;
+          else el.value = m.v;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else if (m.t === 'sync') lastPanelSnap = '';
+      } catch (e) { log('面板操作失败：' + e.message, true); }
+      setTimeout(pushPanel, 20);
+    });
+    pushPanel();
+    setInterval(pushPanel, 250);
+  }
 })();
 `
 
