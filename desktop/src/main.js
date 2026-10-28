@@ -1,11 +1,14 @@
-const { app, BrowserWindow, ipcMain, session, Notification, Menu, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, session, Notification, Menu, dialog, net, safeStorage } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
+const os = require('node:os')
 const crypto = require('node:crypto')
 const collector = require('./generated/collector.json')
 
-// SHA-256 of the access key; the plain key is never stored in the app.
-const KEY_HASH = '49474e012d3b4a6cfceef6c1bb6f12df475f0efe9ce24903bc6d09d3e4d3eab0'
+const LICENSE_SERVER = (process.env.TM_LICENSE_SERVER || collector.licenseServer).replace(/\/+$/, '')
+const RECHECK_MS = 10 * 60 * 1000
+// Tolerate this long without reaching the server before forcing a lock (network blips, server maintenance).
+const OFFLINE_GRACE_MS = 6 * 60 * 60 * 1000
 const MAX_ATTEMPTS = 5
 const PARTITION = 'persist:collector'
 const MATCHERS = collector.matches.map((r) => new RegExp(r))
@@ -48,9 +51,104 @@ function flushValues() {
   fs.writeFileSync(dataFile(), JSON.stringify(values))
 }
 
-function keyMatches(input) {
-  const hash = crypto.createHash('sha256').update(String(input ?? '').trim()).digest()
-  return crypto.timingSafeEqual(hash, Buffer.from(KEY_HASH, 'hex'))
+function machineId() {
+  const macs = Object.values(os.networkInterfaces())
+    .flat()
+    .filter((i) => i && !i.internal && i.mac && i.mac !== '00:00:00:00:00:00')
+    .map((i) => i.mac)
+    .sort()
+  return crypto
+    .createHash('sha256')
+    .update([os.hostname(), os.userInfo().username, os.platform(), os.arch(), macs[0] || ''].join('|'))
+    .digest('hex')
+}
+
+const REASONS = {
+  invalid: '密钥不存在',
+  revoked: '该密钥已被停用',
+  expired: '该密钥已过期',
+  device_limit: '该密钥绑定的电脑数已满，请联系管理员解绑',
+  bad_request: '请求无效',
+}
+
+async function verifyOnline(key) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
+  try {
+    const res = await net.fetch(LICENSE_SERVER + '/api/license/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: String(key ?? '').trim(), machineId: machineId(), version: collector.version }),
+      signal: controller.signal,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (data.ok) return { ok: true, holder: data.holder, expiresAt: data.expiresAt }
+    if (res.status === 403 || res.status === 400) return { ok: false, reason: data.reason || 'invalid' }
+    return { ok: false, offline: true }
+  } catch {
+    return { ok: false, offline: true }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function rememberKey(key) {
+  const settings = readJson(settingsFile())
+  if (key && safeStorage.isEncryptionAvailable()) {
+    settings.license = safeStorage.encryptString(key).toString('base64')
+  } else {
+    delete settings.license
+  }
+  fs.writeFileSync(settingsFile(), JSON.stringify(settings))
+}
+
+function recalledKey() {
+  const enc = readJson(settingsFile()).license
+  if (!enc || !safeStorage.isEncryptionAvailable()) return ''
+  try {
+    return safeStorage.decryptString(Buffer.from(enc, 'base64'))
+  } catch {
+    return ''
+  }
+}
+
+let activeKey = ''
+let lastVerifiedAt = 0
+let recheckTimer = null
+
+function lockOut(message) {
+  clearInterval(recheckTimer)
+  unlocked = false
+  rememberKey('')
+  for (const w of BrowserWindow.getAllWindows()) w.destroy()
+  dialog.showMessageBoxSync({ type: 'warning', title: '授权已失效', message, detail: '程序即将退出。' })
+  app.quit()
+}
+
+function startRecheck() {
+  clearInterval(recheckTimer)
+  recheckTimer = setInterval(async () => {
+    const r = await verifyOnline(activeKey)
+    if (r.ok) {
+      lastVerifiedAt = Date.now()
+    } else if (!r.offline) {
+      lockOut(REASONS[r.reason] || '密钥验证失败')
+    } else if (Date.now() - lastVerifiedAt > OFFLINE_GRACE_MS) {
+      lockOut('长时间无法连接授权服务器，请检查网络后重新打开')
+    }
+  }, RECHECK_MS)
+}
+
+function enterApp(key) {
+  unlocked = true
+  activeKey = key
+  lastVerifiedAt = Date.now()
+  startRecheck()
+  const settings = readJson(settingsFile())
+  Promise.allSettled((settings.extensions || []).map(loadExtension)).finally(() => {
+    createLauncher()
+    lockWin?.close()
+  })
 }
 
 function uiPrefs() {
@@ -215,21 +313,41 @@ function safeTarget(name) {
   return target
 }
 
-ipcMain.handle('ui:unlock', (_e, key) => {
+let verifying = false
+
+ipcMain.handle('ui:unlock', async (_e, key, remember) => {
   if (unlocked) return { ok: true }
-  if (keyMatches(key)) {
-    unlocked = true
-    const settings = readJson(settingsFile())
-    Promise.allSettled((settings.extensions || []).map(loadExtension)).finally(() => {
-      createLauncher()
-      lockWin?.close()
-    })
-    return { ok: true }
+  if (verifying || attempts >= MAX_ATTEMPTS) return { ok: false, message: '请稍候', left: MAX_ATTEMPTS - attempts }
+  verifying = true
+  try {
+    const clean = String(key ?? '').trim()
+    const r = await verifyOnline(clean)
+    if (r.ok) {
+      rememberKey(remember ? clean : '')
+      enterApp(clean)
+      return { ok: true, holder: r.holder }
+    }
+    if (r.offline) return { ok: false, offline: true, message: '无法连接授权服务器，请检查网络后重试', left: MAX_ATTEMPTS - attempts }
+    attempts++
+    const left = MAX_ATTEMPTS - attempts
+    if (left <= 0) setTimeout(() => app.quit(), 1500)
+    return { ok: false, message: REASONS[r.reason] || '密钥验证失败', left: Math.max(left, 0) }
+  } finally {
+    verifying = false
   }
-  attempts++
-  const left = MAX_ATTEMPTS - attempts
-  if (left <= 0) setTimeout(() => app.quit(), 1200)
-  return { ok: false, left: Math.max(left, 0) }
+})
+
+ipcMain.handle('ui:auto-unlock', async () => {
+  if (unlocked) return { ok: true }
+  const key = recalledKey()
+  if (!key) return { ok: false, none: true }
+  const r = await verifyOnline(key)
+  if (r.ok) {
+    enterApp(key)
+    return { ok: true, holder: r.holder }
+  }
+  if (!r.offline) rememberKey('')
+  return { ok: false, offline: r.offline, message: r.offline ? '无法连接授权服务器，请检查网络' : REASONS[r.reason] || '已保存的密钥失效' }
 })
 
 ipcMain.on('ui:platforms', (e) => {

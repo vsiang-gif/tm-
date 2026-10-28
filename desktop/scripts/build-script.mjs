@@ -42,6 +42,7 @@ writeFileSync(
   JSON.stringify({
     name: meta('name')[0],
     version: meta('version')[0],
+    licenseServer: process.env.LICENSE_SERVER || 'https://tm-f76dcc7788ab7827-2747s-projects.vercel.app',
     matches,
     platforms,
     code,
