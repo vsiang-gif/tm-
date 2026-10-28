@@ -51,6 +51,7 @@ const GROUPS = [
     id: 'country',
     name: '站点',
     fields: [
+      { t: 'openUrl' },
       { t: 'kwEditor' },
       chk('kwTranslate', true, '搜索前自动把关键词翻译成该站点当地语言再搜索（用豆包）'),
       act(['genKw', '豆包帮我想更多词'], ['previewKw', '预览各站搜索词']),
@@ -110,8 +111,9 @@ const GROUPS = [
       chk('aiCheck', true, '用豆包审核每个商品（违规 / IP 侵权）'),
       chk('aiVision', true, '审核时看图（双面 / 满印 / 颜色）'),
       head('采集同步（灵图插件 Alt+1）'),
+      { t: 'ext' },
       {
-        k: 'handoff', t: 'select', d: 'alt1', label: '审核通过后',
+        k: 'handoff', t: 'select', d: 'alt1', label: '审核通��后',
         options: [['alt1', '自动按 Alt+1 采集并同步（推荐）'], ['click', '自动点「采集并同步」按钮'], ['mark', '只标绿框，我自己按 Alt+1']],
       },
       num('clickGap', 3, '每次采集间隔（秒）', { min: 1, hint: '不再使用灵图 API。如果 Alt+1 没反应，改选「自动点按钮」。' }),
@@ -251,6 +253,35 @@ async function patchSite(id, change) {
 }
 
 const CUSTOM = {
+  openUrl() {
+    const input = el('input', { id: 'f-openUrl', type: 'text', placeholder: '粘贴任意 Temu / SHEIN / Etsy / 速卖通 等网址', spellcheck: 'false' })
+    const go = el('button', { type: 'button' }, '打开')
+    const open = () => {
+      const v = input.value.trim()
+      if (!v) return flash('请先粘贴网址', true)
+      window.desktop.open(/^https?:\/\//i.test(v) ? v : 'https://' + v)
+    }
+    go.addEventListener('click', open)
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault()
+        open()
+      }
+    })
+    return el('div', { class: 'field' }, el('label', { for: 'f-openUrl' }, '打开网址'), el('div', { class: 'urlrow' }, input, go))
+  },
+
+  ext() {
+    const b = el('button', { type: 'button', class: 'ghost' }, '加载灵图插件（解压目录）')
+    b.addEventListener('click', () => window.desktop.loadExtension())
+    return el(
+      'div',
+      { class: 'field' },
+      b,
+      el('p', { class: 'hint' }, '把灵图插件解压到一个文件夹，点上面按钮选择该文件夹，之后每次启动都会自动加载。'),
+    )
+  },
+
   catInfo() {
     return el('p', { class: 'hint' }, CATS[category()].look)
   },
@@ -360,7 +391,9 @@ const CUSTOM = {
         const kw = el('input', { type: 'text', 'aria-label': s.name + ' 专用关键词', placeholder: '留空 = 用上面共用关键词', spellcheck: 'false' })
         kw.value = e.kws || ''
         kw.addEventListener('change', () => patchSite(s.id, { kws: kw.value.trim() }))
-        det.append(el('div', { class: 'site' }, el('label', { class: 'check', for: id }, box, s.name), kw))
+        const open = el('button', { type: 'button', class: 'ghost small', title: s.url, 'aria-label': '打开 ' + p.name + ' ' + s.name }, '打开')
+        open.addEventListener('click', () => window.desktop.open(s.url))
+        det.append(el('div', { class: 'site' }, el('label', { class: 'check', for: id }, box, s.name), kw, open))
       }
       wrap.append(det)
     }

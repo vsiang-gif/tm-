@@ -88,7 +88,10 @@ button.link:hover { color: var(--text); }
 .sites { display: flex; flex-direction: column; gap: 6px; }
 .sites details { border-bottom: 1px solid var(--line); padding: 8px 0; }
 .sites summary { cursor: pointer; font-weight: 600; }
-.site { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; margin-top: 8px; }
+.site { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; align-items: center; margin-top: 8px; }
+button.small { padding: 6px 12px; }
+.urlrow { display: flex; gap: 10px; }
+.urlrow input { flex: 1; min-width: 0; }
 .site label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .site label.check input { width: 18px; height: 18px; accent-color: var(--blue); }
 .taskbar { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
