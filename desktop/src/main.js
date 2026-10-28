@@ -222,6 +222,10 @@ function wireSiteWindow(win) {
   })
   win.webContents.on('did-create-window', wireSiteWindow)
   const siteId = win.webContents.id
+  lastSite = win.webContents
+  win.on('focus', () => {
+    if (!win.isDestroyed()) lastSite = win.webContents
+  })
   win.webContents.on('destroyed', () => {
     tokens.delete(siteId)
     menuCommands.delete(siteId)
@@ -461,7 +465,53 @@ const CFG_KEYS = new Set([
   'gender', 'colorMode', 'minSales', 'target', 'maxPages', 'pixelCheck', 'darkMin', 'lightMin', 'noPlain', 'printMin',
   'enterStore', 'storeCount', 'storeTarget', 'storeMinSales', 'schedule', 'dailyCap', 'reportTime', 'restEvery',
   'restMin', 'autoResume', 'beep', 'pushType', 'pushKey', 'imgDedupe',
+  'userFirst', 'category', 'blackOnly', 'blackCount', 'whiteCount', 'kwScope', 'kwTranslate',
+  'kwRandColor', 'kwRandCount', 'kwAutoRand', 'autoPick', 'skipWords', 'removeWords',
 ])
+const CFG_OBJECT_KEYS = new Set(['sites', 'platKws', 'catKws'])
+const PAGE_ACTIONS = new Set([
+  'genKw', 'previewKw', 'randKw', 'recommend', 'testPush', 'report',
+  'start', 'here', 'pause', 'end', 'csv', 'clear', 'clearSynced',
+])
+
+function isPlainData(v, depth = 0) {
+  if (depth > 4) return false
+  if (['boolean', 'number', 'string'].includes(typeof v)) return true
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  return Object.values(v).every((x) => isPlainData(x, depth + 1))
+}
+
+let lastSite = null
+function activeSite() {
+  if (lastSite && !lastSite.isDestroyed() && tokens.has(lastSite.id)) return lastSite
+  for (const w of BrowserWindow.getAllWindows()) {
+    const wc = w.webContents
+    if (!wc.isDestroyed() && tokens.has(wc.id)) return wc
+  }
+  return null
+}
+
+ipcMain.handle('ui:page-act', (_e, k) => {
+  if (!unlocked || !PAGE_ACTIONS.has(k)) return { error: '不支持的操作' }
+  const site = activeSite()
+  if (!site) return { error: '请先在「开始采集」里打开一个平台网页，再点这个按钮' }
+  site.send('gm:panel-act', { t: 'key', k })
+  const win = BrowserWindow.fromWebContents(site)
+  if (win && ['start', 'here', 'genKw', 'previewKw', 'recommend', 'report', 'csv'].includes(k)) win.focus()
+  return { ok: true }
+})
+
+ipcMain.handle('ui:defaults', () => (unlocked ? { skip: collector.defaultSkip, remove: collector.defaultRemove } : null))
+
+ipcMain.handle('ui:kw-hist', () => (unlocked ? (Array.isArray(values.kwHistory) ? values.kwHistory.length : 0) : 0))
+
+ipcMain.handle('ui:kw-hist-clear', () => {
+  if (!unlocked) return false
+  values.kwHistory = []
+  saveValues()
+  reloadSitePages()
+  return true
+})
 
 // The script reads cfg once at page load, so reload open collector pages; an active job resumes on its own.
 let reloadTimer = null
@@ -481,8 +531,13 @@ ipcMain.handle('ui:cfg-set', (_e, patch) => {
   if (!unlocked || !patch || typeof patch !== 'object') return false
   const clean = {}
   for (const [k, v] of Object.entries(patch)) {
+    if (CFG_OBJECT_KEYS.has(k)) {
+      if (!isPlainData(v) || typeof v !== 'object' || JSON.stringify(v).length > 500000) return false
+      clean[k] = v
+      continue
+    }
     if (!CFG_KEYS.has(k) || !['boolean', 'number', 'string'].includes(typeof v)) return false
-    clean[k] = typeof v === 'string' ? v.slice(0, 2000) : v
+    clean[k] = typeof v === 'string' ? v.slice(0, 50000) : v
   }
   values.cfg = { ...(values.cfg || {}), ...clean }
   saveValues()
@@ -572,6 +627,9 @@ ipcMain.on('gm:set', (e, token, key, value) => {
   if (!checkToken(e, token)) return
   values[key] = value
   saveValues()
+  if ((key === 'cfg' || key === 'kwHistory') && launcherWin && !launcherWin.isDestroyed()) {
+    launcherWin.webContents.send('ui:values-changed', key)
+  }
 })
 
 ipcMain.on('gm:notify', (e, token, title, body) => {

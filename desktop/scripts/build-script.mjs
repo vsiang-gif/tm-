@@ -2,7 +2,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildUserscript, SITES, PLATFORM_NAMES } from '../../lib/userscript.ts'
+import { buildUserscript, SITES, PLATFORM_NAMES, DEFAULT_SKIP_WORDS, DEFAULT_REMOVE_WORDS } from '../../lib/userscript.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const code = buildUserscript()
@@ -30,6 +30,10 @@ const platforms = Object.entries(PLATFORM_NAMES).map(([id, name]) => ({
   id,
   name,
   sites: SITES.filter((s) => s.p === id).map((s) => ({
+    id: s.id,
+    lang: s.lang,
+    men: s.men,
+    women: s.women,
     name: s.name,
     url: s.origin + (s.prefix ? '/' + s.prefix : ''),
   })),
@@ -45,6 +49,8 @@ writeFileSync(
     licenseServer: process.env.LICENSE_SERVER || 'https://tm-puce-ten.vercel.app',
     matches,
     platforms,
+    defaultSkip: DEFAULT_SKIP_WORDS.join('，'),
+    defaultRemove: DEFAULT_REMOVE_WORDS.join('，'),
     code,
   }),
 )

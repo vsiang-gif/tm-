@@ -2322,7 +2322,7 @@ const COLLECTOR_BODY = String.raw`
     var head = ['状态', '原因/备注', '平台站点', '来源', '商品ID', '原标题', '清洗后标题', '销量', '销量数值', '商品链接', '图片链接', '文件', '时间'];
     var rows = [head.join(',')].concat(records.map(function (r) { return cols.map(function (k) { return '"' + String(r[k] == null ? '' : r[k]).replace(/"/g, '""') + '"'; }).join(','); }));
     var url = URL.createObjectURL(new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv' }));
-    GM_download({ url: url, name: '爆款图案/���集记录_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
+    GM_download({ url: url, name: '爆款图案/�����集记录_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
   }
 
   // ---------- panel ----------
@@ -2721,7 +2721,7 @@ const COLLECTOR_BODY = String.raw`
     try {
       var tasks = await buildTasks(ids);
       if (!tasks.length) { showTab('country'); log('「' + names + '」还没有关键词，请先填写或点「自动生成」', true); return; }
-      log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个关键���');
+      log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个���键���');
       startJob(withUserFirst(tasks));
     } finally { starting = false; render(); }
   }
@@ -2798,6 +2798,7 @@ const COLLECTOR_BODY = String.raw`
     TM_onPanelAct(function (m) {
       try {
         if (m.t === 'click') { var b = resolvePanelPath(m.path || []); if (b && b.click) b.click(); }
+        else if (m.t === 'key') { var kb = /^[A-Za-z]+$/.test(m.k) && host.querySelector('button[data-k="' + m.k + '"]'); if (kb) kb.click(); }
         else if (m.t === 'toggle') { var d = resolvePanelPath(m.path || []); if (d) d.open = !!m.open; }
         else if (m.t === 'set' || m.t === 'file') {
           var el = panelControls()[m.i];

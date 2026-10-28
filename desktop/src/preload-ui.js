@@ -11,4 +11,9 @@ contextBridge.exposeInMainWorld('desktop', {
   dbInfo: () => ipcRenderer.invoke('ui:db-info'),
   dbExport: () => ipcRenderer.invoke('ui:db-export'),
   dbImport: () => ipcRenderer.invoke('ui:db-import'),
+  pageAct: (k) => ipcRenderer.invoke('ui:page-act', k),
+  defaults: () => ipcRenderer.invoke('ui:defaults'),
+  kwHist: () => ipcRenderer.invoke('ui:kw-hist'),
+  kwHistClear: () => ipcRenderer.invoke('ui:kw-hist-clear'),
+  onValuesChanged: (fn) => ipcRenderer.on('ui:values-changed', (_e, key) => fn(key)),
 })
