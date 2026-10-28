@@ -5,7 +5,14 @@ const os = require('node:os')
 const crypto = require('node:crypto')
 const collector = require('./generated/collector.json')
 
-const LICENSE_SERVER = (process.env.TM_LICENSE_SERVER || collector.licenseServer).replace(/\/+$/, '')
+// Several candidates so a single protected or renamed domain cannot lock every client out.
+const LICENSE_SERVERS = [
+  ...new Set(
+    [process.env.TM_LICENSE_SERVER, collector.licenseServer, 'https://tm-puce-ten.vercel.app']
+      .filter(Boolean)
+      .map((u) => String(u).replace(/\/+$/, '')),
+  ),
+]
 const RECHECK_MS = 10 * 60 * 1000
 // Tolerate this long without reaching the server before forcing a lock (network blips, server maintenance).
 const OFFLINE_GRACE_MS = 6 * 60 * 60 * 1000
@@ -72,10 +79,19 @@ const REASONS = {
 }
 
 async function verifyOnline(key) {
+  let last = { ok: false, offline: true }
+  for (const server of LICENSE_SERVERS) {
+    last = await verifyAt(server, key)
+    if (!last.offline) return last
+  }
+  return last
+}
+
+async function verifyAt(server, key) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)
   try {
-    const res = await net.fetch(LICENSE_SERVER + '/api/license/verify', {
+    const res = await net.fetch(server + '/api/license/verify', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ key: String(key ?? '').trim(), machineId: machineId(), version: collector.version }),
