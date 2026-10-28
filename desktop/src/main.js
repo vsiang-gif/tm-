@@ -290,14 +290,28 @@ function checkToken(event, token) {
   return unlocked && tokens.get(event.sender.id) === token
 }
 
-function outputDir() {
-  const dir = path.join(app.getPath('desktop'), '采集')
-  fs.mkdirSync(dir, { recursive: true })
-  return dir
+function appHomeDir() {
+  return path.join(app.getPath('desktop'), '采集')
+}
+
+function placePortableExeInAppHome() {
+  const source = process.env.PORTABLE_EXECUTABLE_FILE
+  if (!source || !fs.existsSync(source)) return
+  try {
+    const home = appHomeDir()
+    const target = path.join(home, path.basename(source))
+    if (path.resolve(source).toLowerCase() === path.resolve(target).toLowerCase()) return
+    fs.mkdirSync(home, { recursive: true })
+    const srcSize = fs.statSync(source).size
+    if (fs.existsSync(target) && fs.statSync(target).size === srcSize) return
+    fs.copyFileSync(source, target)
+  } catch (err) {
+    console.error('copy exe to desktop folder failed:', err)
+  }
 }
 
 function safeTarget(name) {
-  const base = outputDir()
+  const base = app.getPath('downloads')
   const clean = String(name || 'download')
     .replace(/\\/g, '/')
     .split('/')
@@ -461,6 +475,7 @@ app.on('second-instance', () => {
 
 app.whenReady().then(() => {
   values = readJson(dataFile())
+  placePortableExeInAppHome()
   session.fromPartition(PARTITION).on('will-download', (_e, item) => {
     try {
       item.setSavePath(safeTarget(item.getFilename()))
