@@ -1,0 +1,48 @@
+name: Desktop EXE
+
+on:
+  push:
+    paths:
+      - 'desktop/**'
+      - 'lib/userscript.ts'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build EXE
+        working-directory: desktop
+        run: npm run dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TM-Collector-windows
+          path: desktop/dist/*.exe
+          if-no-files-found: error
+
+      - name: Publish to release "desktop-latest"
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-latest
+          name: 爆款图案采集器 Windows 版
+          body: 下载 portable.exe 双击即用，或下载 setup.exe 安装。启动需要输入密钥。
+          files: desktop/dist/*.exe
+          make_latest: true
