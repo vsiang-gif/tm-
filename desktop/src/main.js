@@ -192,8 +192,14 @@ function checkToken(event, token) {
   return unlocked && tokens.get(event.sender.id) === token
 }
 
+function outputDir() {
+  const dir = path.join(app.getPath('desktop'), '采集')
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
 function safeTarget(name) {
-  const base = app.getPath('downloads')
+  const base = outputDir()
   const clean = String(name || 'download')
     .replace(/\\/g, '/')
     .split('/')
@@ -337,6 +343,13 @@ app.on('second-instance', () => {
 
 app.whenReady().then(() => {
   values = readJson(dataFile())
+  session.fromPartition(PARTITION).on('will-download', (_e, item) => {
+    try {
+      item.setSavePath(safeTarget(item.getFilename()))
+    } catch {
+      item.cancel()
+    }
+  })
   buildMenu()
   createLockWindow()
 })
