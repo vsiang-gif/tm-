@@ -53,4 +53,23 @@ main { padding: 20px 28px 32px; display: flex; flex-direction: column; gap: 20px
 .platform { display: flex; flex-direction: column; gap: 10px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chips button { padding: 6px 14px; }
+select {
+  width: 100%; padding: 10px 12px; border-radius: 8px; font: inherit; color: var(--text);
+  border: 1px solid var(--line); background: var(--panel); outline: none;
+}
+select:focus { border-color: var(--blue); }
+.tabs { display: flex; gap: 4px; padding: 0 28px; border-bottom: 1px solid var(--line); }
+.tabs button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 12px 16px; color: var(--dim); }
+.tabs button[aria-selected='true'] { color: var(--text); border-bottom-color: var(--blue); }
+.subtabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.subtabs button { padding: 6px 14px; background: var(--panel); border-color: var(--line); color: var(--dim); }
+.subtabs button[aria-pressed='true'] { background: var(--blue); border-color: var(--blue); color: var(--text); }
+.settings { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > label { font-weight: 500; }
+.field label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; }
+.field label.check input { width: 18px; height: 18px; accent-color: var(--blue); }
+.hint { color: var(--dim); font-size: 13px; line-height: 1.5; }
+.row { display: flex; gap: 10px; }
+.row button { flex: 1; }
 .tip { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }

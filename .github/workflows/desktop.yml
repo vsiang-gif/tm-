@@ -33,7 +33,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TM-Collector-windows
+          name: MT-Collector-windows
           path: desktop/dist/*.exe
           if-no-files-found: error
 
@@ -41,7 +41,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: desktop-latest
-          name: 爆款图案采集器 Windows 版
+          name: MT采集器 Windows 版
           body: 下载 portable.exe 双击即用（首次运行会自动复制一份到桌面「采集」文件夹），或下载 setup.exe 安装（默认安装到桌面「采集」文件夹）。启动需要输入密钥。
           files: desktop/dist/*.exe
           make_latest: true

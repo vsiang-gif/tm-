@@ -1,9 +1,9 @@
 {
   "name": "tm-collector",
-  "productName": "爆款图案采集器",
-  "version": "1.0.0",
+  "productName": "MT采集器",
+  "version": "1.1.0",
   "private": true,
-  "description": "爆款图案采集器 Windows 桌面版（需密钥）",
+  "description": "MT采集器 Windows 桌面版（需密钥）",
   "main": "src/main.js",
   "scripts": {
     "build:script": "node scripts/build-script.mjs",
@@ -16,7 +16,7 @@
   },
   "build": {
     "appId": "com.tm.collector",
-    "productName": "爆款图案采集器",
+    "productName": "MT采集器",
     "directories": {
       "output": "dist"
     },
@@ -31,14 +31,14 @@
       ]
     },
     "portable": {
-      "artifactName": "TM-Collector-${version}-portable.exe"
+      "artifactName": "MT-Collector-${version}-portable.exe"
     },
     "nsis": {
-      "artifactName": "TM-Collector-${version}-setup.exe",
+      "artifactName": "MT-Collector-${version}-setup.exe",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "include": "build/installer.nsh",
-      "shortcutName": "爆款图案采集器"
+      "shortcutName": "MT采集器"
     }
   }
 }

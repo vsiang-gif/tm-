@@ -6,4 +6,9 @@ contextBridge.exposeInMainWorld('desktop', {
   platforms: () => ipcRenderer.sendSync('ui:platforms'),
   open: (url) => ipcRenderer.invoke('ui:open', url),
   loadExtension: () => ipcRenderer.invoke('ui:extension'),
+  getCfg: () => ipcRenderer.invoke('ui:cfg-get'),
+  setCfg: (patch) => ipcRenderer.invoke('ui:cfg-set', patch),
+  dbInfo: () => ipcRenderer.invoke('ui:db-info'),
+  dbExport: () => ipcRenderer.invoke('ui:db-export'),
+  dbImport: () => ipcRenderer.invoke('ui:db-import'),
 })

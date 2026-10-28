@@ -2,7 +2,7 @@ const data = window.desktop.platforms()
 const list = document.getElementById('list')
 
 if (data) {
-  document.getElementById('ver').textContent = '脚本 v' + data.version
+  document.getElementById('ver').textContent = 'v' + data.appVersion + ' · 脚本 v' + data.version
   for (const p of data.platforms) {
     if (!p.sites.length) continue
     const section = document.createElement('section')
@@ -31,3 +31,13 @@ document.getElementById('custom').addEventListener('submit', (e) => {
 })
 
 document.getElementById('ext').addEventListener('click', () => window.desktop.loadExtension())
+
+for (const tab of document.querySelectorAll('.tabs [data-tab]')) {
+  tab.addEventListener('click', () => {
+    for (const t of document.querySelectorAll('.tabs [data-tab]')) {
+      const on = t === tab
+      t.setAttribute('aria-selected', String(on))
+      document.getElementById('tab-' + t.dataset.tab).hidden = !on
+    }
+  })
+}

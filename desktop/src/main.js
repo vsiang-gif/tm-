@@ -27,11 +27,14 @@ let launcherWin = null
 const tokens = new Map()
 const menuCommands = new Map()
 
+// Keep the pre-rename data folder so saved keys, settings, logins and the dedupe DB survive the MT采集器 rename.
+app.setPath('userData', path.join(app.getPath('appData'), '爆款图案采集器'))
+
 if (!app.requestSingleInstanceLock()) app.quit()
 
 app.userAgentFallback = app.userAgentFallback
   .split(' ')
-  .filter((t) => !/^(Electron|tm-collector|爆款图案采集器)\//i.test(t))
+  .filter((t) => !/^(Electron|tm-collector|爆款图案采集器|MT采集器)\//i.test(t))
   .join(' ')
 
 const dataFile = () => path.join(app.getPath('userData'), 'gm-values.json')
@@ -186,7 +189,7 @@ function createLockWindow() {
     height: 460,
     resizable: false,
     maximizable: false,
-    title: '爆款图案采集器 - 验证密钥',
+    title: 'MT采集器 v' + app.getVersion() + ' - 验证密钥',
     backgroundColor: '#161616',
     autoHideMenuBar: true,
     webPreferences: uiPrefs(),
@@ -204,7 +207,7 @@ function createLauncher() {
   launcherWin = new BrowserWindow({
     width: 980,
     height: 720,
-    title: '爆款图案采集器 v' + collector.version,
+    title: 'MT采集器 v' + app.getVersion() + '（脚本 v' + collector.version + '）',
     backgroundColor: '#161616',
     webPreferences: uiPrefs(),
   })
@@ -450,7 +453,89 @@ ipcMain.handle('ui:auto-unlock', async () => {
 })
 
 ipcMain.on('ui:platforms', (e) => {
-  e.returnValue = unlocked ? { version: collector.version, platforms: collector.platforms } : null
+  e.returnValue = unlocked ? { version: collector.version, appVersion: app.getVersion(), platforms: collector.platforms } : null
+})
+
+const CFG_KEYS = new Set([
+  'useAi', 'arkKey', 'arkModel', 'aiCheck', 'aiVision', 'handoff', 'clickGap', 'saveOriginal',
+  'gender', 'colorMode', 'minSales', 'target', 'maxPages', 'pixelCheck', 'darkMin', 'lightMin', 'noPlain', 'printMin',
+  'enterStore', 'storeCount', 'storeTarget', 'storeMinSales', 'schedule', 'dailyCap', 'reportTime', 'restEvery',
+  'restMin', 'autoResume', 'beep', 'pushType', 'pushKey', 'imgDedupe',
+])
+
+// The script reads cfg once at page load, so reload open collector pages; an active job resumes on its own.
+let reloadTimer = null
+function reloadSitePages() {
+  clearTimeout(reloadTimer)
+  reloadTimer = setTimeout(() => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      const wc = w.webContents
+      if (!wc.isDestroyed() && tokens.has(wc.id)) wc.reload()
+    }
+  }, 1500)
+}
+
+ipcMain.handle('ui:cfg-get', () => (unlocked ? values.cfg || {} : null))
+
+ipcMain.handle('ui:cfg-set', (_e, patch) => {
+  if (!unlocked || !patch || typeof patch !== 'object') return false
+  const clean = {}
+  for (const [k, v] of Object.entries(patch)) {
+    if (!CFG_KEYS.has(k) || !['boolean', 'number', 'string'].includes(typeof v)) return false
+    clean[k] = typeof v === 'string' ? v.slice(0, 2000) : v
+  }
+  values.cfg = { ...(values.cfg || {}), ...clean }
+  saveValues()
+  reloadSitePages()
+  return true
+})
+
+ipcMain.handle('ui:db-info', () => {
+  if (!unlocked) return null
+  const len = (k) => (Array.isArray(values[k]) ? values[k].length : 0)
+  return { synced: len('synced'), done: len('done'), hashes: len('hashes') }
+})
+
+ipcMain.handle('ui:db-export', async (e) => {
+  if (!unlocked) return null
+  const day = new Date().toISOString().slice(0, 10)
+  const res = await dialog.showSaveDialog(BrowserWindow.fromWebContents(e.sender), {
+    title: '备份去重库',
+    defaultPath: path.join(appHomeDir(), '去重库-' + day + '.json'),
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  })
+  if (res.canceled || !res.filePath) return null
+  fs.mkdirSync(path.dirname(res.filePath), { recursive: true })
+  fs.writeFileSync(
+    res.filePath,
+    JSON.stringify({ v: 1, exportedAt: new Date().toISOString(), synced: values.synced || [], done: values.done || [], hashes: values.hashes || [] }),
+  )
+  return { ok: true, file: res.filePath }
+})
+
+ipcMain.handle('ui:db-import', async (e) => {
+  if (!unlocked) return null
+  const res = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
+    title: '导入去重库',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  })
+  if (res.canceled || !res.filePaths[0]) return null
+  let data
+  try {
+    data = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8'))
+  } catch {
+    return { error: '文件不是有效的去重库备份' }
+  }
+  if (!data || !Array.isArray(data.synced)) return { error: '文件不是有效的去重库备份' }
+  const merge = (k) => Array.from(new Set([...(values[k] || []), ...(data[k] || []).map(String)]))
+  values.synced = merge('synced')
+  values.done = merge('done')
+  const seen = new Set((values.hashes || []).map((x) => x && x.k))
+  values.hashes = [...(values.hashes || []), ...(Array.isArray(data.hashes) ? data.hashes : []).filter((x) => x && x.h && !seen.has(x.k))]
+  saveValues()
+  reloadSitePages()
+  return { ok: true }
 })
 
 ipcMain.handle('ui:open', (_e, url) => {
