@@ -268,7 +268,7 @@ const COLLECTOR_BODY = String.raw`
     storeMinSales: 500, userFirst: false, colorMode: 'black', blackCount: 30, whiteCount: 30, lightMin: 35,
     myKeywords: '', kwTranslate: true,
     kwRandCount: 10, kwRandColor: 'both', kwAutoRand: false, autoPick: true,
-    noPlain: true, printMin: 3, kwScope: 'temu-us', category: 'cotton', grayMin: 40, catKws: {}
+    noPlain: true, printMin: 3, printOne: true, printTwo: false, printMulti: false, kwScope: 'temu-us', category: 'cotton', grayMin: 40, catKws: {}
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
   if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel) || /seedance|seedream/i.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
@@ -1104,12 +1104,24 @@ const COLLECTOR_BODY = String.raw`
     for (var i = 0; i < hashes.length; i++) if (hamming(hash, hashes[i].h) <= 5) return hashes[i];
     return null;
   }
+  // Printed faces: front, back, left sleeve, right sleeve each count as one. None ticked = no limit.
+  function facesAny() { return !cfg.printOne && !cfg.printTwo && !cfg.printMulti; }
+  function facesAllowed(n) { return facesAny() || (n <= 1 ? !!cfg.printOne : n === 2 ? !!cfg.printTwo : !!cfg.printMulti); }
+  function facesMultiOk() { return facesAny() || cfg.printTwo || cfg.printMulti; }
+  function facesWanted() {
+    var w = [];
+    if (cfg.printOne) w.push('单印花');
+    if (cfg.printTwo) w.push('两个印花');
+    if (cfg.printMulti) w.push('多印花');
+    return '只要' + (w.join(' / ') || '不限');
+  }
+  var DOUBLE_RE = /双面|前后印花|背面印花|double.?sided|front and back|back print/i;
   async function aiCheck(item) {
     var c = cat();
     var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件' + c.ai + '的印花图案。商品标题：' + item.title +
       '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件衣服本身，裤子和配饰的颜色、图案一律忽略。' +
       '\n品类区分：' + CATS.washed.look + '；' + CATS.cotton.look + '。' + (c.tee ? '' : '本次要的品类是 ' + c.look + '。') +
-      '\n只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满（含满身波点、豹纹、星星等小碎花纹）,"multiple":主图里是否出现 2 件或以上衣服（多件装、叠放、多个模特穿不同衣服）,"sleevePrint":袖子或袖口上是否有印花/图案/字母,"plain":是否纯色素面没有任何印花图案,"notColor":衣服主体是否不是' + colorName(item.ctx) + ',"washed":是否是水洗/做旧/酸洗面料（炭灰褪色、斑驳雪花纹理）,"wrongType":这件衣服是否不是' + c.ai + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
+      '\n只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满（含满身波点、豹纹、星星等小碎花纹）,"multiple":主图里是否出现 2 件或以上衣服（多件装、叠放、多个模特穿不同衣服）,"sleevePrint":袖子或袖口上是否有印花/图案/字母,"printFaces":这件衣服一共有几个面有印花（正面、背面、左袖、右袖各算 1 个，胸口小 logo 也算正面有印花，0-4 的整数；图里只拍到一面时按看到的和标题描述推断）,"plain":是否纯色素面没有任何印花图案,"notColor":衣服主体是否不是' + colorName(item.ctx) + ',"washed":是否是水洗/做旧/酸洗面料（炭灰褪色、斑驳雪花纹理）,"wrongType":这件衣服是否不是' + c.ai + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
     var content = cfg.aiVision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: item.imageUrl } }]
       : prompt;
@@ -1118,7 +1130,10 @@ const COLLECTOR_BODY = String.raw`
     if (!bad && r.wrongType) bad = '品类不对，不是' + c.name;
     if (!bad && cfg.category === 'cotton' && r.washed && cfg.aiVision) bad = '是水洗T，不是纯棉T';
     if (!bad && cfg.category === 'washed' && r.washed === false && cfg.aiVision && !WASH_RE.test(item.title)) bad = '不是水洗T（面料颜色均匀，像纯棉T）';
-    if (!bad && cfg.aiVision) bad = (cfg.noPlain && c.tee && r.plain) ? '纯色无图案' : r.multiple ? '多件衣服的主图' : (c.tee && r.sleevePrint) ? '袖子有印花' : r.doubleSided ? '双面印花' : r.fullPrint ? '印花太满' : (cfg.blackOnly && (r.notColor || r.notBlack)) ? '不是' + colorName(item.ctx) : null;
+    var faces = Number(r.printFaces);
+    if (!isFinite(faces)) faces = (r.plain ? 0 : 1) + (r.doubleSided ? 1 : 0) + (c.tee && r.sleevePrint ? 1 : 0);
+    faces = Math.max(0, Math.min(4, Math.round(faces)));
+    if (!bad && cfg.aiVision) bad = (cfg.noPlain && c.tee && r.plain) ? '纯色无图案' : r.multiple ? '多件衣服的主图' : (faces >= 1 && !facesAllowed(faces)) ? '印花面数不符（' + faces + ' 个印花，' + facesWanted() + '）' : r.fullPrint ? '印花太满' : (cfg.blackOnly && (r.notColor || r.notBlack)) ? '不是' + colorName(item.ctx) : null;
     return bad ? bad + (r.reason ? '：' + r.reason : '') : null;
   }
 
@@ -1166,7 +1181,7 @@ const COLLECTOR_BODY = String.raw`
   function dayStats(d) { return GM_getValue('daily', {})[d || today()] || emptyDay(); }
   function reasonGroup(r) {
     r = String(r || '');
-    return /违规/.test(r) ? '违规内容' : /IP|品牌/.test(r) ? 'IP/品牌' : /双面/.test(r) ? '双面印花' : /太满/.test(r) ? '印花太满' : /品类|水洗|纯棉/.test(r) ? '品类不对' : /黑色|颜色/.test(r) ? '非黑色' : /标题含/.test(r) ? '跳过词' : '其他';
+    return /违规/.test(r) ? '违规内容' : /IP|品牌/.test(r) ? 'IP/品牌' : /双面|印花面数|袖子有印花/.test(r) ? '印花面数' : /太满/.test(r) ? '印花太满' : /品类|水洗|纯棉/.test(r) ? '品类不对' : /黑色|颜色/.test(r) ? '非黑色' : /标题含/.test(r) ? '跳过词' : '其他';
   }
   function bump(kind, site, reason) {
     var all = GM_getValue('daily', {}), d = today(), s = Object.assign(emptyDay(), all[d]);
@@ -1278,7 +1293,7 @@ const COLLECTOR_BODY = String.raw`
     var tee = cat().tee;
     if (info && cfg.noPlain && info.stairs >= 3) { markSkipped(item, '多件衣服叠放的主图（' + info.stairs + ' 层）'); return false; }
     if (info && cfg.noPlain && tee && info.multiColor >= 0.22) { markSkipped(item, '多件不同颜色衣服的主图（另一件占 ' + Math.round(info.multiColor * 100) + '%）'); return false; }
-    if (info && cfg.noPlain && tee && info.sleeve >= 0.06) { markSkipped(item, '袖子有印花（袖子印花占比 ' + (info.sleeve * 100).toFixed(1) + '%）'); return false; }
+    if (info && cfg.noPlain && tee && !facesMultiOk() && info.sleeve >= 0.06) { markSkipped(item, '袖子有印花，不是单印花（袖子印花占比 ' + (info.sleeve * 100).toFixed(1) + '%）'); return false; }
     if (info && cfg.noPlain && tee && info.print < cfg.printMin / 100) {
       markSkipped(item, '纯色无图案（印花占比 ' + (info.print * 100).toFixed(1) + '%）'); return false;
     }
@@ -1371,6 +1386,7 @@ const COLLECTOR_BODY = String.raw`
         return;
       }
       var hit = findHit(x.title, skipList);
+      if (hit && facesMultiOk() && DOUBLE_RE.test(hit)) hit = null;
       if (hit) { stats.skipped++; log('跳过 ' + x.goodsId + '：标题含「' + hit + '」'); markCard(x.el, 'bad', '不采：标题含「' + hit + '」'); return; }
       var st = ctx.task;
       if (st && st.type === 'store' && st.keyword && !titleMatchesKeyword(x.title, st.keyword)) {
@@ -2322,7 +2338,7 @@ const COLLECTOR_BODY = String.raw`
     var head = ['状态', '原因/备注', '平台站点', '来源', '商品ID', '原标题', '清洗后标题', '销量', '销量数值', '商品链接', '图片链接', '文件', '时间'];
     var rows = [head.join(',')].concat(records.map(function (r) { return cols.map(function (k) { return '"' + String(r[k] == null ? '' : r[k]).replace(/"/g, '""') + '"'; }).join(','); }));
     var url = URL.createObjectURL(new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv' }));
-    GM_download({ url: url, name: '爆款图案/采集记录_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
+    GM_download({ url: url, name: '爆款图案/�������集记录_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
   }
 
   // ---------- panel ----------
@@ -2414,6 +2430,11 @@ const COLLECTOR_BODY = String.raw`
         '<div data-pane="filter" style="display:none">' +
           check('noPlain', '不采纯色款（纯黑 / 纯白 / 素色），必须有印花图案') +
           row(field('印花占比下限 %（低于算纯色）', input('printMin', 'type="number" min="0" max="50" step="0.5"')), '<span style="flex:1"></span>') +
+          '<div style="font-weight:600;margin:6px 0 4px">印花数量（可多选）</div>' +
+          check('printOne', '单个印花（只有前面或只有后面一个印花）') +
+          check('printTwo', '两个印花（前 + 后，或 一面 + 袖子）') +
+          check('printMulti', '多印花（3 个及以上，如后背 + 左右袖）') +
+          hint('正面、背面、左袖、右袖各算一个印花面，用豆包看图判断。都不勾 = 不限。') +
           check('pixelCheck', '检测图片：颜色不对 / 印花太满的不要') +
           row(field('黑色占比下限 %', input('darkMin', 'type="number" min="5" max="95"')), field('白色占比下限 %', input('lightMin', 'type="number" min="5" max="95"'))) +
           field('跳过词（标题出现就不采）', '<textarea data-k="skipWords" rows="5" style="' + inputCss + ';resize:vertical"></textarea>') +
@@ -2538,7 +2559,7 @@ const COLLECTOR_BODY = String.raw`
     $(k).value = cfg[k];
     $(k).onchange = function () { var v = parseInt($(k).value, 10); cfg[k] = isFinite(v) && v >= 0 ? v : DEFAULTS[k]; $(k).value = cfg[k]; save(); render(); };
   });
-  ['blackOnly', 'pixelCheck', 'enterStore', 'saveOriginal', 'aiCheck', 'aiVision', 'imgDedupe', 'autoResume', 'beep', 'userFirst', 'kwTranslate', 'noPlain'].forEach(function (k) {
+  ['blackOnly', 'pixelCheck', 'enterStore', 'saveOriginal', 'aiCheck', 'aiVision', 'imgDedupe', 'autoResume', 'beep', 'userFirst', 'kwTranslate', 'noPlain', 'printOne', 'printTwo', 'printMulti'].forEach(function (k) {
     $(k).checked = !!cfg[k];
     $(k).onchange = function () { cfg[k] = $(k).checked; save(); };
   });
@@ -2721,7 +2742,7 @@ const COLLECTOR_BODY = String.raw`
     try {
       var tasks = await buildTasks(ids);
       if (!tasks.length) { showTab('country'); log('「' + names + '」还没有关键词，请先填写或点「自动生成」', true); return; }
-      log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个关键词');
+      log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个���键���');
       startJob(withUserFirst(tasks));
     } finally { starting = false; render(); }
   }
@@ -2776,6 +2797,48 @@ const COLLECTOR_BODY = String.raw`
   render();
   log('就绪 v' + SCRIPT_VERSION + (cfg.useAi ? '' : ' · 豆包已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
+
+  // Desktop app: the panel is rendered natively by the exe, so keep it off-page and mirror it over IPC.
+  if (typeof TM_panelPush === 'function' && typeof TM_onPanelAct === 'function') {
+    host.style.setProperty('left', '-100000px', 'important');
+    host.style.setProperty('right', 'auto', 'important');
+    host.style.setProperty('visibility', 'hidden', 'important');
+    host.style.setProperty('pointer-events', 'none', 'important');
+    var lastPanelSnap = '';
+    var panelControls = function () { return host.querySelectorAll('input,select,textarea'); };
+    var pushPanel = function () {
+      var vals = Array.prototype.map.call(panelControls(), function (el) { return [el.type === 'file' ? '' : el.value, !!el.checked]; });
+      var snap = JSON.stringify({ style: host.getAttribute('style'), html: host.innerHTML, vals: vals });
+      if (snap !== lastPanelSnap) { lastPanelSnap = snap; TM_panelPush(snap); }
+    };
+    var resolvePanelPath = function (path) {
+      var el = host;
+      for (var i = 0; el && i < path.length; i++) el = el.children[path[i]];
+      return el;
+    };
+    TM_onPanelAct(function (m) {
+      try {
+        if (m.t === 'click') { var b = resolvePanelPath(m.path || []); if (b && b.click) b.click(); }
+        else if (m.t === 'key') { var kb = /^[A-Za-z]+$/.test(m.k) && host.querySelector('button[data-k="' + m.k + '"]'); if (kb) kb.click(); }
+        else if (m.t === 'toggle') { var d = resolvePanelPath(m.path || []); if (d) d.open = !!m.open; }
+        else if (m.t === 'set' || m.t === 'file') {
+          var el = panelControls()[m.i];
+          if (!el) return;
+          if (m.t === 'file') {
+            var dt = new DataTransfer();
+            dt.items.add(new File([m.text], m.name || 'import.json', { type: 'application/json' }));
+            el.files = dt.files;
+          } else if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!m.c;
+          else el.value = m.v;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else if (m.t === 'sync') lastPanelSnap = '';
+      } catch (e) { log('面板操作失败：' + e.message, true); }
+      setTimeout(pushPanel, 20);
+    });
+    pushPanel();
+    setInterval(pushPanel, 250);
+  }
 })();
 `
 

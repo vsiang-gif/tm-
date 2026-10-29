@@ -12,10 +12,19 @@ if (boot) {
     downloadUrl: (t, u, n) => ipcRenderer.invoke('gm:download-url', t, u, n),
     notify: (t, title, body) => ipcRenderer.send('gm:notify', t, title, body),
     registerMenu: (t, n) => ipcRenderer.send('gm:menu-register', t, n),
+    panelPush: (t, s) => ipcRenderer.send('gm:panel-push', t, s),
   })
 
   ipcRenderer.on('gm:menu', (_e, name) => {
     webFrame.executeJavaScript('window.__tmRunMenu && window.__tmRunMenu(' + JSON.stringify(name) + ')')
+  })
+
+  // userGesture=true so panel clicks can open confirm dialogs and file pickers like a real click would.
+  ipcRenderer.on('gm:panel-act', (_e, msg) => {
+    webFrame.executeJavaScript(
+      'window.__tmRunPanel && window.__tmRunPanel(' + JSON.stringify(boot.token) + ',' + JSON.stringify(msg) + ')',
+      true,
+    )
   })
 
   const shim = [
@@ -29,6 +38,10 @@ if (boot) {
     'var __menus = {};',
     'window.__tmRunMenu = function (n) { if (__menus[n]) __menus[n](); };',
     'function GM_registerMenuCommand(n, fn) { __menus[n] = fn; __b.registerMenu(__t, n); return n; }',
+    'var __panelAct = null;',
+    'function TM_panelPush(s) { __b.panelPush(__t, s); }',
+    'function TM_onPanelAct(fn) { __panelAct = fn; }',
+    'window.__tmRunPanel = function (tok, m) { if (tok === __t && __panelAct) __panelAct(m); };',
     'function GM_xmlhttpRequest(o) {',
     '  var aborted = false, rt = o.responseType || "";',
     '  var data = o.data == null ? undefined : (typeof o.data === "string" ? o.data : String(o.data));',

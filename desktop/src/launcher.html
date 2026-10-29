@@ -3,30 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
-    <title>爆款图案采集器</title>
+    <title>MT采集器</title>
     <link rel="stylesheet" href="ui.css" />
   </head>
   <body>
     <header class="top">
       <div>
-        <h1>选择要采集的平台和国家</h1>
-        <p class="dim">点击后会打开新窗口，采集面板固定显示在网页右侧。首次使用请先在打开的网页里登录账号，登录状态会自动保存。</p>
+        <h1>MT采集器</h1>
+        <p class="dim">在「站点」里勾选要采集的平台和国家，点「打开」进入网页；所有选项改完自动保存，已打开的网页会自动刷新生效。</p>
       </div>
       <span id="ver" class="ver"></span>
     </header>
-    <main>
-      <form id="custom" class="custom">
-        <label for="url" class="sr-only">网址</label>
-        <input id="url" type="url" placeholder="或粘贴任意 Temu / SHEIN / Etsy / 速卖通 等网址" required />
-        <button type="submit">打开</button>
-      </form>
-      <div id="list" class="list"></div>
-      <section class="tip">
-        <h2>灵图插件</h2>
-        <p class="dim">采集通过的商品需要灵图插件点「采集并同步」。把灵图插件解压到一个文件夹，然后点下面按钮选择该文件夹，之后每次启动都会自动加载。</p>
-        <button id="ext" type="button" class="ghost">加载灵图插件（解压目录）</button>
-      </section>
+    <main id="tab-settings">
+      <nav class="subtabs" id="groups" aria-label="设置分类"></nav>
+      <form id="settings" class="settings" autocomplete="off"></form>
+      <p id="saved" class="msg ok" role="status" aria-live="polite"></p>
     </main>
     <script src="launcher.js"></script>
+    <script src="settings.js"></script>
   </body>
 </html>

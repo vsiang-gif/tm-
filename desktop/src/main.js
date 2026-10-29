@@ -1,11 +1,18 @@
-const { app, BrowserWindow, ipcMain, session, Notification, Menu, dialog, net, safeStorage } = require('electron')
+const { app, BrowserWindow, WebContentsView, ipcMain, session, Notification, Menu, dialog, net, safeStorage } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
 const crypto = require('node:crypto')
 const collector = require('./generated/collector.json')
 
-const LICENSE_SERVER = (process.env.TM_LICENSE_SERVER || collector.licenseServer).replace(/\/+$/, '')
+// Several candidates so a single protected or renamed domain cannot lock every client out.
+const LICENSE_SERVERS = [
+  ...new Set(
+    [process.env.TM_LICENSE_SERVER, collector.licenseServer, 'https://tm-puce-ten.vercel.app']
+      .filter(Boolean)
+      .map((u) => String(u).replace(/\/+$/, '')),
+  ),
+]
 const RECHECK_MS = 10 * 60 * 1000
 // Tolerate this long without reaching the server before forcing a lock (network blips, server maintenance).
 const OFFLINE_GRACE_MS = 6 * 60 * 60 * 1000
@@ -20,11 +27,14 @@ let launcherWin = null
 const tokens = new Map()
 const menuCommands = new Map()
 
+// Keep the pre-rename data folder so saved keys, settings, logins and the dedupe DB survive the MT采集器 rename.
+app.setPath('userData', path.join(app.getPath('appData'), '爆款图案采集器'))
+
 if (!app.requestSingleInstanceLock()) app.quit()
 
 app.userAgentFallback = app.userAgentFallback
   .split(' ')
-  .filter((t) => !/^(Electron|tm-collector|爆款图案采集器)\//i.test(t))
+  .filter((t) => !/^(Electron|tm-collector|爆款图案采集器|MT采集器)\//i.test(t))
   .join(' ')
 
 const dataFile = () => path.join(app.getPath('userData'), 'gm-values.json')
@@ -72,10 +82,19 @@ const REASONS = {
 }
 
 async function verifyOnline(key) {
+  let last = { ok: false, offline: true }
+  for (const server of LICENSE_SERVERS) {
+    last = await verifyAt(server, key)
+    if (!last.offline) return last
+  }
+  return last
+}
+
+async function verifyAt(server, key) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)
   try {
-    const res = await net.fetch(LICENSE_SERVER + '/api/license/verify', {
+    const res = await net.fetch(server + '/api/license/verify', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ key: String(key ?? '').trim(), machineId: machineId(), version: collector.version }),
@@ -170,7 +189,7 @@ function createLockWindow() {
     height: 460,
     resizable: false,
     maximizable: false,
-    title: '爆款图案采集器 - 验证密钥',
+    title: 'MT采集器 v' + app.getVersion() + ' - 验证密钥',
     backgroundColor: '#161616',
     autoHideMenuBar: true,
     webPreferences: uiPrefs(),
@@ -188,7 +207,7 @@ function createLauncher() {
   launcherWin = new BrowserWindow({
     width: 980,
     height: 720,
-    title: '爆款图案采集器 v' + collector.version,
+    title: 'MT采集器 v' + app.getVersion() + '（脚本 v' + collector.version + '）',
     backgroundColor: '#161616',
     webPreferences: uiPrefs(),
   })
@@ -202,11 +221,84 @@ function wireSiteWindow(win) {
     return { action: 'allow', overrideBrowserWindowOptions: { width: 1400, height: 900, webPreferences: sitePrefs() } }
   })
   win.webContents.on('did-create-window', wireSiteWindow)
+  const siteId = win.webContents.id
+  lastSite = win.webContents
+  win.on('focus', () => {
+    if (!win.isDestroyed()) lastSite = win.webContents
+  })
   win.webContents.on('destroyed', () => {
-    tokens.delete(win.webContents.id)
-    menuCommands.delete(win.webContents.id)
+    tokens.delete(siteId)
+    menuCommands.delete(siteId)
+    panels.delete(siteId)
+  })
+  attachPanel(win)
+}
+
+// The collector panel is a native view docked on the right of each site window; the page no longer shows it.
+const PANEL_WIDTH = 360
+const PANEL_COLLAPSED_HEIGHT = 46
+const panels = new Map()
+const panelOwners = new Map()
+
+function attachPanel(win) {
+  const view = new WebContentsView({
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(__dirname, 'preload-panel.js') },
+  })
+  view.setBackgroundColor('#161616')
+  view.setVisible(false)
+  win.contentView.addChildView(view)
+  view.webContents.loadFile(path.join(__dirname, 'panel.html'))
+  const site = win.webContents
+  const state = { view, win, collapsed: false, ready: false }
+  panels.set(site.id, state)
+  panelOwners.set(view.webContents.id, site)
+
+  const layout = () => {
+    if (win.isDestroyed()) return
+    const [w, h] = win.getContentSize()
+    const width = Math.min(PANEL_WIDTH, w)
+    view.setBounds({ x: w - width, y: 0, width, height: state.collapsed ? Math.min(PANEL_COLLAPSED_HEIGHT, h) : h })
+  }
+  state.layout = layout
+  layout()
+  win.on('resize', layout)
+  view.webContents.once('did-finish-load', () => (state.ready = true))
+  site.on('did-start-navigation', (details) => {
+    const isMain = details && typeof details === 'object' ? details.isMainFrame && !details.isSameDocument : true
+    if (!isMain) return
+    view.setVisible(false)
+    if (state.ready) view.webContents.send('panel:reset')
+  })
+  win.on('closed', () => {
+    panelOwners.delete(view.webContents.id)
+    if (!view.webContents.isDestroyed()) view.webContents.close()
   })
 }
+
+ipcMain.on('gm:panel-push', (e, token, snap) => {
+  if (!checkToken(e, token) || typeof snap !== 'string') return
+  const state = panels.get(e.sender.id)
+  if (!state || state.win.isDestroyed()) return
+  state.view.webContents.send('panel:snapshot', snap)
+  if (!state.view.getVisible()) {
+    state.view.setVisible(true)
+    state.layout()
+  }
+})
+
+ipcMain.on('panel:act', (e, msg) => {
+  const site = panelOwners.get(e.sender.id)
+  if (!unlocked || !site || site.isDestroyed() || !tokens.has(site.id) || !msg || typeof msg !== 'object') return
+  site.send('gm:panel-act', msg)
+})
+
+ipcMain.on('panel:collapse', (e, on) => {
+  const site = panelOwners.get(e.sender.id)
+  const state = site && panels.get(site.id)
+  if (!state) return
+  state.collapsed = !!on
+  state.layout()
+})
 
 function openSite(url) {
   const win = new BrowserWindow({ width: 1400, height: 900, backgroundColor: '#ffffff', webPreferences: sitePrefs() })
@@ -290,14 +382,28 @@ function checkToken(event, token) {
   return unlocked && tokens.get(event.sender.id) === token
 }
 
-function outputDir() {
-  const dir = path.join(app.getPath('desktop'), '采集')
-  fs.mkdirSync(dir, { recursive: true })
-  return dir
+function appHomeDir() {
+  return path.join(app.getPath('desktop'), '采集')
+}
+
+function placePortableExeInAppHome() {
+  const source = process.env.PORTABLE_EXECUTABLE_FILE
+  if (!source || !fs.existsSync(source)) return
+  try {
+    const home = appHomeDir()
+    const target = path.join(home, path.basename(source))
+    if (path.resolve(source).toLowerCase() === path.resolve(target).toLowerCase()) return
+    fs.mkdirSync(home, { recursive: true })
+    const srcSize = fs.statSync(source).size
+    if (fs.existsSync(target) && fs.statSync(target).size === srcSize) return
+    fs.copyFileSync(source, target)
+  } catch (err) {
+    console.error('copy exe to desktop folder failed:', err)
+  }
 }
 
 function safeTarget(name) {
-  const base = outputDir()
+  const base = app.getPath('downloads')
   const clean = String(name || 'download')
     .replace(/\\/g, '/')
     .split('/')
@@ -351,7 +457,140 @@ ipcMain.handle('ui:auto-unlock', async () => {
 })
 
 ipcMain.on('ui:platforms', (e) => {
-  e.returnValue = unlocked ? { version: collector.version, platforms: collector.platforms } : null
+  e.returnValue = unlocked ? { version: collector.version, appVersion: app.getVersion(), platforms: collector.platforms } : null
+})
+
+const CFG_KEYS = new Set([
+  'useAi', 'arkKey', 'arkModel', 'aiCheck', 'aiVision', 'handoff', 'clickGap', 'saveOriginal',
+  'gender', 'colorMode', 'minSales', 'target', 'maxPages', 'pixelCheck', 'darkMin', 'lightMin', 'noPlain', 'printMin', 'printOne', 'printTwo', 'printMulti',
+  'enterStore', 'storeCount', 'storeTarget', 'storeMinSales', 'schedule', 'dailyCap', 'reportTime', 'restEvery',
+  'restMin', 'autoResume', 'beep', 'pushType', 'pushKey', 'imgDedupe',
+  'userFirst', 'category', 'blackOnly', 'blackCount', 'whiteCount', 'kwScope', 'kwTranslate',
+  'kwRandColor', 'kwRandCount', 'kwAutoRand', 'autoPick', 'skipWords', 'removeWords',
+])
+const CFG_OBJECT_KEYS = new Set(['sites', 'platKws', 'catKws'])
+const PAGE_ACTIONS = new Set([
+  'genKw', 'previewKw', 'randKw', 'recommend', 'testPush', 'report',
+  'start', 'here', 'pause', 'end', 'csv', 'clear', 'clearSynced',
+])
+
+function isPlainData(v, depth = 0) {
+  if (depth > 4) return false
+  if (['boolean', 'number', 'string'].includes(typeof v)) return true
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  return Object.values(v).every((x) => isPlainData(x, depth + 1))
+}
+
+let lastSite = null
+function activeSite() {
+  if (lastSite && !lastSite.isDestroyed() && tokens.has(lastSite.id)) return lastSite
+  for (const w of BrowserWindow.getAllWindows()) {
+    const wc = w.webContents
+    if (!wc.isDestroyed() && tokens.has(wc.id)) return wc
+  }
+  return null
+}
+
+ipcMain.handle('ui:page-act', (_e, k) => {
+  if (!unlocked || !PAGE_ACTIONS.has(k)) return { error: '不支持的操作' }
+  const site = activeSite()
+  if (!site) return { error: '请先在「开始采集」里打开一个平台网页，再点这个按钮' }
+  site.send('gm:panel-act', { t: 'key', k })
+  const win = BrowserWindow.fromWebContents(site)
+  if (win && ['start', 'here', 'genKw', 'previewKw', 'recommend', 'report', 'csv'].includes(k)) win.focus()
+  return { ok: true }
+})
+
+ipcMain.handle('ui:defaults', () => (unlocked ? { skip: collector.defaultSkip, remove: collector.defaultRemove } : null))
+
+ipcMain.handle('ui:kw-hist', () => (unlocked ? (Array.isArray(values.kwHistory) ? values.kwHistory.length : 0) : 0))
+
+ipcMain.handle('ui:kw-hist-clear', () => {
+  if (!unlocked) return false
+  values.kwHistory = []
+  saveValues()
+  reloadSitePages()
+  return true
+})
+
+// The script reads cfg once at page load, so reload open collector pages; an active job resumes on its own.
+let reloadTimer = null
+function reloadSitePages() {
+  clearTimeout(reloadTimer)
+  reloadTimer = setTimeout(() => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      const wc = w.webContents
+      if (!wc.isDestroyed() && tokens.has(wc.id)) wc.reload()
+    }
+  }, 1500)
+}
+
+ipcMain.handle('ui:cfg-get', () => (unlocked ? values.cfg || {} : null))
+
+ipcMain.handle('ui:cfg-set', (_e, patch) => {
+  if (!unlocked || !patch || typeof patch !== 'object') return false
+  const clean = {}
+  for (const [k, v] of Object.entries(patch)) {
+    if (CFG_OBJECT_KEYS.has(k)) {
+      if (!isPlainData(v) || typeof v !== 'object' || JSON.stringify(v).length > 500000) return false
+      clean[k] = v
+      continue
+    }
+    if (!CFG_KEYS.has(k) || !['boolean', 'number', 'string'].includes(typeof v)) return false
+    clean[k] = typeof v === 'string' ? v.slice(0, 50000) : v
+  }
+  values.cfg = { ...(values.cfg || {}), ...clean }
+  saveValues()
+  reloadSitePages()
+  return true
+})
+
+ipcMain.handle('ui:db-info', () => {
+  if (!unlocked) return null
+  const len = (k) => (Array.isArray(values[k]) ? values[k].length : 0)
+  return { synced: len('synced'), done: len('done'), hashes: len('hashes') }
+})
+
+ipcMain.handle('ui:db-export', async (e) => {
+  if (!unlocked) return null
+  const day = new Date().toISOString().slice(0, 10)
+  const res = await dialog.showSaveDialog(BrowserWindow.fromWebContents(e.sender), {
+    title: '备份去重库',
+    defaultPath: path.join(appHomeDir(), '去重库-' + day + '.json'),
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  })
+  if (res.canceled || !res.filePath) return null
+  fs.mkdirSync(path.dirname(res.filePath), { recursive: true })
+  fs.writeFileSync(
+    res.filePath,
+    JSON.stringify({ v: 1, exportedAt: new Date().toISOString(), synced: values.synced || [], done: values.done || [], hashes: values.hashes || [] }),
+  )
+  return { ok: true, file: res.filePath }
+})
+
+ipcMain.handle('ui:db-import', async (e) => {
+  if (!unlocked) return null
+  const res = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
+    title: '导入去重库',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  })
+  if (res.canceled || !res.filePaths[0]) return null
+  let data
+  try {
+    data = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8'))
+  } catch {
+    return { error: '文件不是有效的去重库备份' }
+  }
+  if (!data || !Array.isArray(data.synced)) return { error: '文件不是有效的去重库备份' }
+  const merge = (k) => Array.from(new Set([...(values[k] || []), ...(data[k] || []).map(String)]))
+  values.synced = merge('synced')
+  values.done = merge('done')
+  const seen = new Set((values.hashes || []).map((x) => x && x.k))
+  values.hashes = [...(values.hashes || []), ...(Array.isArray(data.hashes) ? data.hashes : []).filter((x) => x && x.h && !seen.has(x.k))]
+  saveValues()
+  reloadSitePages()
+  return { ok: true }
 })
 
 ipcMain.handle('ui:open', (_e, url) => {
@@ -388,6 +627,9 @@ ipcMain.on('gm:set', (e, token, key, value) => {
   if (!checkToken(e, token)) return
   values[key] = value
   saveValues()
+  if ((key === 'cfg' || key === 'kwHistory') && launcherWin && !launcherWin.isDestroyed()) {
+    launcherWin.webContents.send('ui:values-changed', key)
+  }
 })
 
 ipcMain.on('gm:notify', (e, token, title, body) => {
@@ -461,6 +703,7 @@ app.on('second-instance', () => {
 
 app.whenReady().then(() => {
   values = readJson(dataFile())
+  placePortableExeInAppHome()
   session.fromPartition(PARTITION).on('will-download', (_e, item) => {
     try {
       item.setSavePath(safeTarget(item.getFilename()))
