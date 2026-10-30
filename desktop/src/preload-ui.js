@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('desktop', {
   unlock: (key, remember) => ipcRenderer.invoke('ui:unlock', key, Boolean(remember)),
   autoUnlock: () => ipcRenderer.invoke('ui:auto-unlock'),
   platforms: () => ipcRenderer.sendSync('ui:platforms'),
-  open: (url) => ipcRenderer.invoke('ui:open', url),
+  open: (url, autoAct) => ipcRenderer.invoke('ui:open', url, autoAct),
   loadExtension: () => ipcRenderer.invoke('ui:extension'),
   getCfg: () => ipcRenderer.invoke('ui:cfg-get'),
   setCfg: (patch) => ipcRenderer.invoke('ui:cfg-set', patch),

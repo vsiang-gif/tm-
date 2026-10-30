@@ -92,7 +92,7 @@ const GROUPS = [
       txt('schedule', '', '定时开工（多个用逗号隔开，如 09:00,20:00）', { placeholder: '留空 = 不定时' }),
       row(num('dailyCap', 0, '每日最多同步（0 = 不限）'), txt('reportTime', '22:00', '日报推送时间')),
       row(num('restEvery', 50, '每采几张休息一次'), num('restMin', 2, '每次休息分钟')),
-      chk('autoResume', false, '遇到验证码 / 要登录 / 国家不对：提醒我，处理好后自动继续'),
+      chk('autoResume', false, '遇到���证码 / 要登录 / 国家不对：提醒我，处理好后自动继续'),
       chk('beep', true, '需要处理时电脑响提示音'),
       {
         k: 'pushType', t: 'select', d: 'none', label: '微信提醒',
@@ -113,7 +113,7 @@ const GROUPS = [
       txt('arkModel', 'doubao-seed-2-0-pro', '模型 / 接入点 ID', {
         hint: '填文字/看图模型，如 doubao-seed-2-0-pro、doubao-seed-2-0-lite。Seedance 2.0（视频）和 Seedream（画图）不能用于审核和翻译，填了会自动改回。',
       }),
-      chk('aiCheck', true, '用豆包审核每个商品（违规 / IP 侵权）'),
+      chk('aiCheck', true, '���豆包审核每个商品（违规 / IP 侵权）'),
       chk('aiVision', true, '审核时看图（双面 / 满印 / 颜色）'),
       head('采集同步（灵图插件 Alt+1）'),
       { t: 'ext' },
@@ -260,20 +260,23 @@ async function patchSite(id, change) {
 const CUSTOM = {
   openUrl() {
     const input = el('input', { id: 'f-openUrl', type: 'text', placeholder: '粘贴任意 Temu / SHEIN / Etsy / 速卖通 等网址', spellcheck: 'false' })
-    const go = el('button', { type: 'button' }, '打开')
-    const open = () => {
+    const go = el('button', { type: 'button' }, '打开并采集')
+    const only = el('button', { type: 'button', class: 'ghost' }, '仅打开')
+    const open = (autoAct) => {
       const v = input.value.trim()
       if (!v) return flash('请先粘贴网址', true)
-      window.desktop.open(/^https?:\/\//i.test(v) ? v : 'https://' + v)
+      window.desktop.open(/^https?:\/\//i.test(v) ? v : 'https://' + v, autoAct)
+      if (autoAct) flash('已打开，页面加载完成后会自动采集当前页')
     }
-    go.addEventListener('click', open)
+    go.addEventListener('click', () => open('here'))
+    only.addEventListener('click', () => open(''))
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
         e.preventDefault()
-        open()
+        open('here')
       }
     })
-    return el('div', { class: 'field' }, el('label', { for: 'f-openUrl' }, '打开网址'), el('div', { class: 'urlrow' }, input, go))
+    return el('div', { class: 'field' }, el('label', { for: 'f-openUrl' }, '打开网址'), el('div', { class: 'urlrow' }, input, go, only))
   },
 
   ext() {
@@ -309,7 +312,7 @@ const CUSTOM = {
     const onCount = ALL_SITES.filter((s) => s.p === kwScope() && siteEntry(s).on).length
     const info =
       category() === 'cotton'
-        ? pName + ' 所有国家共用这一份关键词，搜索时自动翻译成当地语言。' + (onCount ? '已勾选 ' + onCount + ' 个站点。' : '还没勾选 ' + pName + ' 的站点')
+        ? pName + ' 所有国家共用这一份关键词，搜索时自动翻译成当地语言。' + (onCount ? '已���选 ' + onCount + ' 个站点。' : '还没勾选 ' + pName + ' 的站点')
         : CATS[category()].name + ' 品类所有网站共用这一份关键词。留空 = 用内置词。'
     return el(
       'div',

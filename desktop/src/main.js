@@ -249,7 +249,8 @@ function attachPanel(win) {
   win.contentView.addChildView(view)
   view.webContents.loadFile(path.join(__dirname, 'panel.html'))
   const site = win.webContents
-  const state = { view, win, collapsed: false, ready: false }
+  const state = { view, win, collapsed: false, ready: false, lastSnap: '', autoAct: autoActFor.get(win.id) || '', autoTimer: null }
+  autoActFor.delete(win.id)
   panels.set(site.id, state)
   panelOwners.set(view.webContents.id, site)
 
@@ -262,14 +263,21 @@ function attachPanel(win) {
   state.layout = layout
   layout()
   win.on('resize', layout)
-  view.webContents.once('did-finish-load', () => (state.ready = true))
+  // Snapshots pushed before the panel page finished loading would otherwise be lost and leave it stuck on "loading".
+  view.webContents.once('did-finish-load', () => {
+    state.ready = true
+    if (state.lastSnap) view.webContents.send('panel:snapshot', state.lastSnap)
+  })
   site.on('did-start-navigation', (details) => {
     const isMain = details && typeof details === 'object' ? details.isMainFrame && !details.isSameDocument : true
     if (!isMain) return
+    state.lastSnap = ''
+    clearTimeout(state.autoTimer)
     view.setVisible(false)
     if (state.ready) view.webContents.send('panel:reset')
   })
   win.on('closed', () => {
+    clearTimeout(state.autoTimer)
     panelOwners.delete(view.webContents.id)
     if (!view.webContents.isDestroyed()) view.webContents.close()
   })
@@ -279,10 +287,23 @@ ipcMain.on('gm:panel-push', (e, token, snap) => {
   if (!checkToken(e, token) || typeof snap !== 'string') return
   const state = panels.get(e.sender.id)
   if (!state || state.win.isDestroyed()) return
-  state.view.webContents.send('panel:snapshot', snap)
+  const first = !state.lastSnap
+  state.lastSnap = snap
+  if (state.ready) state.view.webContents.send('panel:snapshot', snap)
   if (!state.view.getVisible()) {
     state.view.setVisible(true)
     state.layout()
+  }
+  // Wait for redirects (e.g. temu.com -> temu.com/ca) to settle before auto-starting; a navigation cancels the timer.
+  if (first && state.autoAct) {
+    const site = e.sender
+    clearTimeout(state.autoTimer)
+    state.autoTimer = setTimeout(() => {
+      if (site.isDestroyed() || !tokens.has(site.id) || !state.autoAct) return
+      const k = state.autoAct
+      state.autoAct = ''
+      site.send('gm:panel-act', { t: 'key', k })
+    }, 3500)
   }
 })
 
@@ -300,8 +321,12 @@ ipcMain.on('panel:collapse', (e, on) => {
   state.layout()
 })
 
-function openSite(url) {
+const autoActFor = new Map()
+const AUTO_ACTIONS = new Set(['here', 'start'])
+
+function openSite(url, autoAct) {
   const win = new BrowserWindow({ width: 1400, height: 900, backgroundColor: '#ffffff', webPreferences: sitePrefs() })
+  if (AUTO_ACTIONS.has(autoAct)) autoActFor.set(win.id, autoAct)
   wireSiteWindow(win)
   win.loadURL(url)
 }
@@ -593,12 +618,12 @@ ipcMain.handle('ui:db-import', async (e) => {
   return { ok: true }
 })
 
-ipcMain.handle('ui:open', (_e, url) => {
+ipcMain.handle('ui:open', (_e, url, autoAct) => {
   if (!unlocked) return false
   try {
     const u = new URL(String(url))
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
-    openSite(u.toString())
+    openSite(u.toString(), typeof autoAct === 'string' ? autoAct : '')
     return true
   } catch {
     return false
