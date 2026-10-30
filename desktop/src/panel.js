@@ -110,6 +110,11 @@ pick.addEventListener('change', async () => {
   window.panelApi.act({ t: 'file', i, name: file.name, text: await file.text() })
 })
 
+// While waiting, keep asking the page to resend its full panel; the script only pushes on change otherwise.
+setInterval(() => {
+  if (!wait.hidden) window.panelApi.act({ t: 'sync' })
+}, 1000)
+
 window.panelApi.onSnapshot(render)
 window.panelApi.onReset(() => {
   wait.hidden = false
