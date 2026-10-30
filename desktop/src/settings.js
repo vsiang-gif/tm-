@@ -51,7 +51,6 @@ const GROUPS = [
     id: 'country',
     name: '站点',
     fields: [
-      { t: 'openUrl' },
       { t: 'kwEditor' },
       chk('kwTranslate', true, '搜索前自动把关键词翻译成该站点当地语言再搜索（用豆包）'),
       act(['genKw', '豆包帮我想更多词'], ['previewKw', '预览各站搜索词']),
@@ -258,35 +257,14 @@ async function patchSite(id, change) {
 }
 
 const CUSTOM = {
-  openUrl() {
-    const input = el('input', { id: 'f-openUrl', type: 'text', placeholder: '粘贴任意 Temu / SHEIN / Etsy / 速卖通 等网址', spellcheck: 'false' })
-    const go = el('button', { type: 'button' }, '打开并采集')
-    const only = el('button', { type: 'button', class: 'ghost' }, '仅打开')
-    const open = (autoAct) => {
-      const v = input.value.trim()
-      if (!v) return flash('请先粘贴网址', true)
-      window.desktop.open(/^https?:\/\//i.test(v) ? v : 'https://' + v, autoAct)
-      if (autoAct) flash('已打开，页面加载完成后会自动采集当前页')
-    }
-    go.addEventListener('click', () => open('here'))
-    only.addEventListener('click', () => open(''))
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
-        e.preventDefault()
-        open('here')
-      }
-    })
-    return el('div', { class: 'field' }, el('label', { for: 'f-openUrl' }, '打开网址'), el('div', { class: 'urlrow' }, input, go, only))
-  },
-
   ext() {
-    const b = el('button', { type: 'button', class: 'ghost' }, '加载灵图插件（解压目录）')
+    const b = el('button', { type: 'button', class: 'ghost' }, '加载其他插件（解压目录）')
     b.addEventListener('click', () => window.desktop.loadExtension())
     return el(
       'div',
       { class: 'field' },
       b,
-      el('p', { class: 'hint' }, '把灵图插件解压到一个文件夹，点上面按钮选择该文件夹，之后每次启动都会自动加载。'),
+      el('p', { class: 'hint' }, '灵图卖家辅助工具已内置，启动时自动加载，在打开的网页里登录灵图账号即可使用。其他插件可解压到文件夹后用上面按钮加载。'),
     )
   },
 

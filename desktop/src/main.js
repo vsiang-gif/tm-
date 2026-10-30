@@ -164,7 +164,8 @@ function enterApp(key) {
   lastVerifiedAt = Date.now()
   startRecheck()
   const settings = readJson(settingsFile())
-  Promise.allSettled((settings.extensions || []).map(loadExtension)).finally(() => {
+  const dirs = Array.from(new Set([...bundledExtensionDirs(), ...(settings.extensions || [])]))
+  Promise.allSettled(dirs.map(loadExtension)).finally(() => {
     createLauncher()
     lockWin?.close()
   })
@@ -290,9 +291,11 @@ ipcMain.on('gm:panel-push', (e, token, snap) => {
   const first = !state.lastSnap
   state.lastSnap = snap
   if (state.ready) state.view.webContents.send('panel:snapshot', snap)
-  if (!state.view.getVisible()) {
-    state.view.setVisible(true)
-    state.layout()
+  // The panel stays out of the way while a collection run is in progress and comes back once it stops.
+  const collecting = snap.startsWith('{"run":true')
+  if (state.view.getVisible() === collecting) {
+    state.view.setVisible(!collecting)
+    if (!collecting) state.layout()
   }
   // Wait for redirects (e.g. temu.com -> temu.com/ca) to settle before auto-starting; a navigation cancels the timer.
   if (first && state.autoAct) {
@@ -338,6 +341,19 @@ function openSite(url, autoAct) {
   if (AUTO_ACTIONS.has(autoAct)) autoActFor.set(win.id, autoAct)
   wireSiteWindow(win)
   win.loadURL(url)
+}
+
+// Extensions shipped inside the installer (e.g. 灵图卖家辅助工具) live in resources/extensions/<name>.
+function bundledExtensionDirs() {
+  const root = app.isPackaged ? path.join(process.resourcesPath, 'extensions') : path.join(__dirname, '..', 'extensions')
+  try {
+    return fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && fs.existsSync(path.join(root, d.name, 'manifest.json')))
+      .map((d) => path.join(root, d.name))
+  } catch {
+    return []
+  }
 }
 
 async function loadExtension(dir) {

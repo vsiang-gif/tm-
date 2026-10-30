@@ -457,7 +457,7 @@ const COLLECTOR_BODY = String.raw`
   }
   function cleanTitle(title) {
     var t = String(title || '');
-    t = t.replace(/秋冬|春秋|秋季|冬季|秋款|冬款/g, '四季').replace(/(四季)+/g, '四季');
+    t = t.replace(/��冬|春秋|秋季|冬季|秋款|冬款/g, '四季').replace(/(四季)+/g, '四季');
     t = t.replace(/\b(autumn\s*(and|&|\/)\s*winter|fall\s*(and|&|\/)\s*winter|autumn|winter)\b/gi, 'All Season').replace(/(All Season\s*)+/g, 'All Season ');
     t = stripWords(t, removeList);
     t = stripWords(t, cfg.gender === 'men' ? femaleList : maleList);
@@ -2326,7 +2326,7 @@ const COLLECTOR_BODY = String.raw`
   async function recommendSites() {
     var list = SITES.map(function (s) { return s.id + '=' + siteLabel(s); }).join('，');
     log('正在问豆包哪些平台和国家黑色印花 T 恤卖得好…');
-    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的平台和国家站点采集爆款图案。请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
+    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的平台和国家站点采集爆款图案��请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
     var ids = (r.sites || r.countries || []).map(function (x) { return String(x).toLowerCase(); });
     SITES.forEach(function (s) { cfg.sites[s.id].on = ids.indexOf(s.id) >= 0; });
     if (!ids.some(function (id) { return cfg.sites[id]; })) cfg.sites['temu-us'].on = true;
@@ -2808,7 +2808,7 @@ const COLLECTOR_BODY = String.raw`
     var panelControls = function () { return host.querySelectorAll('input,select,textarea'); };
     var pushPanel = function () {
       var vals = Array.prototype.map.call(panelControls(), function (el) { return [el.type === 'file' ? '' : el.value, !!el.checked]; });
-      var snap = JSON.stringify({ style: host.getAttribute('style'), html: host.innerHTML, vals: vals });
+      var snap = JSON.stringify({ run: !!running, style: host.getAttribute('style'), html: host.innerHTML, vals: vals });
       if (snap !== lastPanelSnap) { lastPanelSnap = snap; TM_panelPush(snap); }
     };
     var resolvePanelPath = function (path) {
