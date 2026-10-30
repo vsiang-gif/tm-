@@ -307,6 +307,15 @@ ipcMain.on('gm:panel-push', (e, token, snap) => {
   }
 })
 
+// The panel pulls the latest snapshot itself, so delivery never depends on load-event timing.
+ipcMain.handle('panel:pull', (e) => {
+  const site = panelOwners.get(e.sender.id)
+  const state = site && panels.get(site.id)
+  if (!state) return ''
+  state.ready = true
+  return state.lastSnap
+})
+
 ipcMain.on('panel:act', (e, msg) => {
   const site = panelOwners.get(e.sender.id)
   if (!unlocked || !site || site.isDestroyed() || !tokens.has(site.id) || !msg || typeof msg !== 'object') return

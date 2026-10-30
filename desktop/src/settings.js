@@ -44,7 +44,7 @@ const GROUPS = [
       },
       row(num('blackCount', 0, '每站黑 T 采集（张）'), num('whiteCount', 0, '每站白 T 采集（张）')),
       hint('轮换模式：每个站点先用黑 T 关键词采够设定张数，再自动换成白 T 关键词（自动把 black/schwarz/noir/黑 等换成 white/weiß/blanc/白）。0 = 不限。'),
-      hint('Etsy / Amazon 卡片不显示销量，用评价数代替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。'),
+      hint('Etsy / Amazon 卡片不显示销量，用评价数��替；SHEIN 没有销量也没有评价时照样采，按黑色优先排序。'),
     ],
   },
   {
@@ -384,7 +384,14 @@ const CUSTOM = {
       await save({ sites })
       render()
     })
-    wrap.append(el('div', { class: 'between end' }, none))
+    const startAll = el('button', { type: 'button' }, '一键开始采集（自动搜关键词）')
+    startAll.addEventListener('click', () => {
+      const first = ALL_SITES.find((s) => siteEntry(s).on)
+      if (!first) return flash('请先勾选至少一个站点', true)
+      window.desktop.open(first.url, 'start')
+      flash('已打开 ' + first.name + '，页面加载完成后会自动按关键词采集所有勾选的站点')
+    })
+    wrap.append(el('div', { class: 'between' }, startAll, none))
     for (const p of PLATFORMS) {
       if (!p.sites.length) continue
       const list = ALL_SITES.filter((s) => s.p === p.id)

@@ -110,10 +110,21 @@ pick.addEventListener('change', async () => {
   window.panelApi.act({ t: 'file', i, name: file.name, text: await file.text() })
 })
 
-// While waiting, keep asking the page to resend its full panel; the script only pushes on change otherwise.
-setInterval(() => {
+// While waiting, pull the latest snapshot and ask the page to resend; the script only pushes on change otherwise.
+let lastPulled = ''
+const pull = async () => {
+  if (wait.hidden) return
+  try {
+    const snap = await window.panelApi.pull()
+    if (snap && snap !== lastPulled) {
+      lastPulled = snap
+      render(snap)
+    }
+  } catch {}
   if (!wait.hidden) window.panelApi.act({ t: 'sync' })
-}, 1000)
+}
+pull()
+setInterval(pull, 700)
 
 window.panelApi.onSnapshot(render)
 window.panelApi.onReset(() => {
