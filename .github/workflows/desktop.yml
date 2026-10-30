@@ -31,12 +31,6 @@ jobs:
         working-directory: desktop
         run: npm run dist
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: MT-Collector-windows
-          path: desktop/dist/*.exe
-          if-no-files-found: error
-
       - name: Publish to release "desktop-latest"
         uses: softprops/action-gh-release@v2
         with:
