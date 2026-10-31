@@ -834,6 +834,12 @@ function isPlainData(v, depth = 0) {
   return Object.values(v).every((x) => isPlainData(x, depth + 1))
 }
 
+function firstCheckedSite() {
+  const chosen = (values.cfg && values.cfg.sites) || {}
+  const all = (collector.platforms || []).flatMap((p) => p.sites.map((x) => ({ ...x, name: p.name + ' ' + x.name })))
+  return all.find((x) => (chosen[x.id] ? chosen[x.id].on : x.id === 'temu-us') && /^https:\/\//.test(x.url)) || null
+}
+
 let lastSite = null
 function activeSite() {
   if (lastSite && !lastSite.isDestroyed() && tokens.has(lastSite.id)) return lastSite
@@ -847,7 +853,13 @@ function activeSite() {
 ipcMain.handle('ui:page-act', (_e, k) => {
   if (!unlocked || !PAGE_ACTIONS.has(k)) return { error: '不支持的操作' }
   const site = activeSite()
-  if (!site) return { error: '请先在「开始采集」里打开一个平台网页，再点这个按钮' }
+  if (!site) {
+    if (k !== 'start') return { error: '还没有打开网页窗口，先点「开始多站点采集」，程序会自动打开勾选的站点' }
+    const first = firstCheckedSite()
+    if (!first) return { error: '请先在下面勾选至少一个要采集的站点' }
+    openSite(first.url, 'start')
+    return { ok: true, opened: first.name }
+  }
   site.send('gm:panel-act', { t: 'key', k })
   const win = BrowserWindow.fromWebContents(site)
   if (win && ['start', 'here', 'genKw', 'previewKw', 'recommend', 'report', 'csv'].includes(k)) win.focus()

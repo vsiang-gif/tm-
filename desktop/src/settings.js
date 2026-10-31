@@ -51,7 +51,6 @@ const GROUPS = [
     id: 'country',
     name: '站点',
     fields: [
-      { t: 'openUrl' },
       { t: 'kwEditor' },
       chk('kwTranslate', true, '搜索前自动把关键词翻译成该站点当地语言再搜索（用豆包）'),
       act(['genKw', '豆包帮我想更多词'], ['previewKw', '预览各站搜索词']),
@@ -187,6 +186,7 @@ async function freshCfg() {
 async function pageAct(k) {
   const r = await window.desktop.pageAct(k)
   if (r && r.error) flash(r.error, true)
+  else if (r && r.opened) flash('已自动打开「' + r.opened + '」，加载完成后会按勾选的站点依次采集')
   else flash('已发送到网页窗口')
 }
 
@@ -277,7 +277,7 @@ const CUSTOM = {
     const info = el('p', { class: 'hint' }, '读取中…')
     const refresh = async () => {
       const wins = (await window.desktop.windows()) || []
-      info.textContent = wins.length ? '已打开 ' + wins.length + ' 个网页窗口，点一下切换过去：' : '还没有打开网页窗口，先在上面「打开网址」或点「开始多站点采集」。'
+      info.textContent = wins.length ? '已打开 ' + wins.length + ' 个网页窗口，点一下切换过去：' : '还没有打开网页窗口，点「开始多站点采集」会自动打开勾选的站点。'
       list.replaceChildren(
         ...wins.map((w) => {
           const b = el('button', { type: 'button', title: w.title }, '#' + w.no + ' ' + String(w.title).slice(0, 24))
@@ -344,27 +344,6 @@ const CUSTOM = {
       el('div', { class: 'row wrap' }, check, page),
       el('p', { class: 'hint' }, '有新版时会弹窗提示，下载后关闭旧版再运行新版即可，密钥、设置、登录状态和去重库都会保留。'),
     )
-  },
-
-  openUrl() {
-    const input = el('input', { id: 'f-openUrl', type: 'text', placeholder: '粘贴任意 Temu / SHEIN / Etsy / 速卖通 等网址', spellcheck: 'false' })
-    const go = el('button', { type: 'button' }, '打开并采集')
-    const only = el('button', { type: 'button', class: 'ghost' }, '仅打开')
-    const open = (autoAct) => {
-      const v = input.value.trim()
-      if (!v) return flash('请先粘贴网址', true)
-      window.desktop.open(/^https?:\/\//i.test(v) ? v : 'https://' + v, autoAct)
-      if (autoAct) flash('已打开，页面加载完成后会自动采集当前页')
-    }
-    go.addEventListener('click', () => open('here'))
-    only.addEventListener('click', () => open(''))
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
-        e.preventDefault()
-        open('here')
-      }
-    })
-    return el('div', { class: 'field' }, el('label', { for: 'f-openUrl' }, '打开网址'), el('div', { class: 'urlrow' }, input, go, only))
   },
 
   ext() {
@@ -544,7 +523,7 @@ function render() {
     'div',
     { class: 'taskbar' },
     fieldNode(TASK_BAR),
-    el('p', { class: 'hint' }, '这些按钮会操作最近使用的那个网页窗口；网页右侧的面板会显示进度和日志。'),
+    el('p', { class: 'hint' }, '勾选好站点后直接点「开始多站点采集」，程序会自动打开网页并依次采集；已打开网页时操作最近使用的那个窗口，右侧面板显示进度和日志。'),
   )
   form.replaceChildren(...g.fields.map(fieldNode), bar)
 }
