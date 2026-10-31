@@ -206,10 +206,16 @@ async function fetchLatest() {
   if (!res.ok) throw new Error('HTTP ' + res.status)
   const rel = await res.json()
   const assets = Array.isArray(rel.assets) ? rel.assets : []
-  const pick = (re) => assets.find((a) => re.test(a.name))
-  const asset = (process.env.PORTABLE_EXECUTABLE_FILE ? pick(/portable\.exe$/i) : pick(/setup\.exe$/i)) || pick(/\.exe$/i)
-  const m = asset && asset.name.match(/(\d+\.\d+\.\d+)/)
-  return m ? { version: m[1], url: asset.browser_download_url, notes: String(rel.body || '').slice(0, 800) } : null
+  const pick = (re) => {
+    let best = null
+    for (const a of assets) {
+      const m = re.test(a.name) && a.name.match(/(\d+\.\d+\.\d+)/)
+      if (m && (!best || newerThan(m[1], best.version))) best = { version: m[1], url: a.browser_download_url }
+    }
+    return best
+  }
+  const best = (process.env.PORTABLE_EXECUTABLE_FILE ? pick(/portable\.exe$/i) : pick(/setup\.exe$/i)) || pick(/\.exe$/i)
+  return best ? { ...best, notes: String(rel.body || '').slice(0, 800) } : null
 }
 
 function showBox(opts) {

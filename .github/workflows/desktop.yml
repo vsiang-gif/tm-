@@ -39,3 +39,16 @@ jobs:
           body: 下载 portable.exe 双击即用（首次运行会自动复制一份到桌面「采集」文件夹），或下载 setup.exe 安装（默认安装到桌面「采集」文件夹）。启动需要输入密钥。
           files: desktop/dist/*.exe
           make_latest: true
+
+      - name: Remove older installers from the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          $names = gh release view desktop-latest -R ${{ github.repository }} --json assets --jq '.assets[].name'
+          foreach ($n in $names) {
+            if ($n -like '*.exe' -and $n -notlike "*-$ver-*") {
+              gh release delete-asset desktop-latest $n -R ${{ github.repository }} -y
+            }
+          }
