@@ -1663,7 +1663,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.36.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.37.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -2533,6 +2533,48 @@ const COLLECTOR_BODY = String.raw`
       mountPanel();
     });
   }
+
+  // ---------- self update (Tampermonkey etc.; the desktop app updates the script itself) ----------
+  var SCRIPT_UPDATE_URL = 'https://tm-puce-ten.vercel.app/collector.user.js';
+  var IN_DESKTOP = typeof GM_info !== 'undefined' && GM_info.scriptHandler === 'TM Collector Desktop';
+  function verNewer(a, b) {
+    var pa = String(a).split('.'), pb = String(b).split('.');
+    for (var i = 0; i < 3; i++) { var x = +pa[i] || 0, y = +pb[i] || 0; if (x !== y) return x > y; }
+    return false;
+  }
+  function showUpdateBar(v) {
+    if (host.querySelector('[data-k="updBar"]')) return;
+    var bar = document.createElement('button');
+    bar.type = 'button';
+    bar.setAttribute('data-k', 'updBar');
+    bar.style.cssText = 'display:block;width:100%;box-sizing:border-box;margin:0 0 8px;padding:8px 10px;border:0;border-radius:6px;cursor:pointer;font-size:13px;text-align:left;color:#fff;background:' + C.blue;
+    bar.textContent = '采集脚本有新版本 v' + v + '（当前 v' + SCRIPT_VERSION + '），点这里更新';
+    bar.onclick = function () { window.open(SCRIPT_UPDATE_URL + '?v=' + v, '_blank'); };
+    host.insertBefore(bar, host.firstChild);
+  }
+  function checkScriptUpdate(manual) {
+    if (typeof GM_xmlhttpRequest !== 'function') return;
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: SCRIPT_UPDATE_URL + '?t=' + Date.now(),
+      timeout: 15000,
+      onload: function (r) {
+        var m = /\/\/ @version\s+(\d+\.\d+\.\d+)/.exec(r.responseText || '');
+        if (!m) { if (manual) alert('检查更新失败：服务器返回内容不对，稍后再试'); return; }
+        GM_setValue('updCheckedAt', Date.now());
+        if (verNewer(m[1], SCRIPT_VERSION)) {
+          showUpdateBar(m[1]);
+          if (manual && confirm('发现新版本 v' + m[1] + '，现在更新吗？')) window.open(SCRIPT_UPDATE_URL + '?v=' + m[1], '_blank');
+        } else if (manual) alert('已是最新版本 v' + SCRIPT_VERSION);
+      },
+      onerror: function () { if (manual) alert('检查更新失败：连不上更新服务器'); },
+      ontimeout: function () { if (manual) alert('检查更新失败：连接超时'); },
+    });
+  }
+  if (!IN_DESKTOP) {
+    if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('检查脚本更新', function () { checkScriptUpdate(true); });
+    if (Date.now() - (+GM_getValue('updCheckedAt', 0) || 0) > 6 * 3600000) setTimeout(function () { checkScriptUpdate(false); }, 5000);
+  }
   function $(k) { return host.querySelector('[data-k="' + k + '"]'); }
 
   function showTab(k) {
@@ -2883,6 +2925,8 @@ const COLLECTOR_BODY = String.raw`
 })();
 `
 
+const UPDATE_URL = 'https://tm-puce-ten.vercel.app/collector.user.js'
+
 export function buildUserscript() {
   const body = COLLECTOR_BODY.replace('__SITES__', () => JSON.stringify(SITES))
     .replace('__PNAMES__', () => JSON.stringify(PLATFORM_NAMES))
@@ -2908,7 +2952,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.36.0',
+    '// @version      6.37.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
@@ -2919,6 +2963,8 @@ export function buildUserscript() {
     '// @grant        GM_registerMenuCommand',
     '// @grant        GM_notification',
     '// @connect      *',
+    '// @updateURL    ' + UPDATE_URL,
+    '// @downloadURL  ' + UPDATE_URL,
     '// @run-at       document-idle',
     '// @noframes',
     '// ==/UserScript==',

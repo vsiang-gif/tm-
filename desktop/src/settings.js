@@ -329,6 +329,8 @@ const CUSTOM = {
       check.disabled = true
       check.textContent = '检查中…'
       await window.desktop.checkUpdate()
+      const p = await window.desktop.appPrefs()
+      if (p) info.textContent = '当前版本 v' + p.version + ' · 采集脚本 v' + p.script
       check.disabled = false
       check.textContent = '立即检查更新'
     })

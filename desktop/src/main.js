@@ -3,7 +3,10 @@ const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
 const crypto = require('node:crypto')
-const collector = require('./generated/collector.json')
+const { spawn } = require('node:child_process')
+// Mutable copy: a newer script downloaded at runtime replaces code/version without reinstalling the app.
+const collector = { ...require('./generated/collector.json') }
+const BUNDLED_SCRIPT_VERSION = collector.version
 
 // Several candidates so a single protected or renamed domain cannot lock every client out.
 const LICENSE_SERVERS = [
@@ -165,6 +168,7 @@ function enterApp(key) {
   activeKey = key
   lastVerifiedAt = Date.now()
   startRecheck()
+  loadScriptOverride()
   const settings = readJson(settingsFile())
   Promise.allSettled((settings.extensions || []).map(loadExtension)).finally(() => {
     createLauncher()
@@ -208,35 +212,187 @@ function showBox(opts) {
   return parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts)
 }
 
+const scriptFile = () => path.join(app.getPath('userData'), 'collector-script.json')
+
+function loadScriptOverride() {
+  const saved = readJson(scriptFile())
+  if (saved && typeof saved.code === 'string' && saved.name === collector.name && newerThan(saved.version, BUNDLED_SCRIPT_VERSION)) {
+    collector.code = saved.code
+    collector.version = saved.version
+  }
+}
+
+async function fetchLatestScript() {
+  let lastErr
+  for (const base of LICENSE_SERVERS) {
+    try {
+      const res = await net.fetch(base + '/collector.user.js?t=' + Date.now(), { headers: { 'Cache-Control': 'no-cache' } })
+      if (!res.ok) throw new Error('HTTP ' + res.status)
+      const code = await res.text()
+      const end = code.indexOf('// ==/UserScript==')
+      const header = end > 0 ? code.slice(0, end) : ''
+      const name = ((header.match(/^\/\/ @name\s+(.+)$/m) || [])[1] || '').trim()
+      const version = (header.match(/^\/\/ @version\s+(\d+\.\d+\.\d+)/m) || [])[1]
+      if (!version || name !== collector.name) throw new Error('脚本内容无法识别')
+      return { version, code }
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  throw lastErr || new Error('没有可用的服务器')
+}
+
+function setAllProgress(p) {
+  for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.setProgressBar(p)
+}
+
+async function downloadInstaller(latest) {
+  const dir = path.join(app.getPath('temp'), 'mt-collector-update')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, decodeURIComponent(path.basename(new URL(latest.url).pathname)))
+  if (fs.existsSync(file)) return file
+  const res = await net.fetch(latest.url)
+  if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
+  const total = Number(res.headers.get('content-length')) || 0
+  const part = file + '.part'
+  const fd = fs.openSync(part, 'w')
+  let got = 0
+  try {
+    const reader = res.body.getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      fs.writeSync(fd, value)
+      got += value.length
+      if (total) setAllProgress(got / total)
+    }
+  } finally {
+    fs.closeSync(fd)
+    setAllProgress(-1)
+  }
+  if (total && got !== total) throw new Error('下载不完整（' + got + '/' + total + '）')
+  fs.renameSync(part, file)
+  return file
+}
+
+// Runs on quit; the short delay lets this process release the single-instance lock and its files first.
+let pendingInstaller = null
+function launchInstaller(file) {
+  let target = file
+  const portable = process.env.PORTABLE_EXECUTABLE_FILE
+  if (portable) {
+    try {
+      target = path.join(path.dirname(portable), path.basename(file))
+      if (path.resolve(target) !== path.resolve(file)) fs.copyFileSync(file, target)
+    } catch {
+      target = file
+    }
+  }
+  spawn('cmd.exe', ['/d', '/s', '/c', '"ping -n 3 127.0.0.1 >nul & start "" "' + target + '""'], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+  }).unref()
+}
+app.on('quit', () => {
+  if (!pendingInstaller) return
+  try {
+    launchInstaller(pendingInstaller)
+  } catch {}
+})
+
+async function offerAppUpdate(latest, manual) {
+  if (!manual && readJson(settingsFile()).skipVersion === latest.version) return false
+  const r = await showBox({
+    type: 'info',
+    buttons: ['立即更新', '稍后', '跳过这个版本'],
+    defaultId: 0,
+    cancelId: 1,
+    message: '发现新版本 MT采集器 v' + latest.version,
+    detail: '当前版本 v' + app.getVersion() + (latest.notes ? '\n\n' + latest.notes : '') + '\n\n点「立即更新」会在后台自动下载（任务栏图标显示进度），下载期间可以继续使用。',
+  })
+  if (r.response === 2) patchSettings({ skipVersion: latest.version })
+  if (r.response !== 0) return false
+  let file
+  try {
+    file = await downloadInstaller(latest)
+  } catch (e) {
+    const f = await showBox({
+      type: 'error',
+      buttons: ['用浏览器下载', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      message: '自动下载失败',
+      detail: String(e && e.message ? e.message : e) + '\n\n可以改用浏览器下载，下载后关闭旧版再运行新版即可。',
+    })
+    if (f.response === 0) shell.openExternal(latest.url)
+    return false
+  }
+  pendingInstaller = file
+  const portable = !!process.env.PORTABLE_EXECUTABLE_FILE
+  const d = await showBox({
+    type: 'info',
+    buttons: ['立即重启并更新', '退出软件时再更新'],
+    defaultId: 0,
+    cancelId: 1,
+    message: '新版本 v' + latest.version + ' 已下载好',
+    detail:
+      (portable ? '会关闭当前软件并自动打开新版（新版文件放在旧版同一个文件夹）。' : '会关闭当前软件并打开安装程序，按提示点「下一步」即可。') +
+      '\n密钥、设置、登录状态和去重库都会保留。正在采集的话，建议等这一轮结束再更新。',
+  })
+  if (d.response === 0) app.quit()
+  return true
+}
+
+async function offerScriptUpdate(latest, manual) {
+  if (!manual && readJson(settingsFile()).skipScriptVersion === latest.version) return false
+  const r = await showBox({
+    type: 'info',
+    buttons: ['立即更新', '稍后', '跳过这个版本'],
+    defaultId: 0,
+    cancelId: 1,
+    message: '采集脚本有新版本 v' + latest.version,
+    detail: '当前脚本 v' + collector.version + '\n\n脚本更新不用重装软件，点「立即更新」几秒内生效，已打开的平台网页会自动刷新，进行中的采集任务会自动续上。',
+  })
+  if (r.response === 2) patchSettings({ skipScriptVersion: latest.version })
+  if (r.response !== 0) return false
+  fs.writeFileSync(scriptFile(), JSON.stringify({ name: collector.name, version: latest.version, code: latest.code }))
+  collector.code = latest.code
+  collector.version = latest.version
+  reloadSitePages()
+  if (Notification.isSupported()) new Notification({ title: 'MT采集器', body: '采集脚本已更新到 v' + latest.version }).show()
+  return true
+}
+
+const errText = (r) => (r.status === 'rejected' ? String(r.reason && r.reason.message ? r.reason.message : r.reason) : '')
+
 let updateBusy = false
-async function checkUpdate(manual) {
+async function checkAll(manual) {
   if (updateBusy) return { busy: true }
   updateBusy = true
-  const current = app.getVersion()
   try {
-    const latest = await fetchLatest()
-    if (!latest || !newerThan(latest.version, current)) {
-      if (manual) await showBox({ type: 'info', message: '已是最新版本', detail: '当前版本 v' + current })
-      return { current, latest: latest ? latest.version : current, update: false }
+    const [appRes, scriptRes] = await Promise.allSettled([fetchLatest(), fetchLatestScript()])
+    const appLatest = appRes.status === 'fulfilled' ? appRes.value : null
+    const scriptLatest = scriptRes.status === 'fulfilled' ? scriptRes.value : null
+    const appNew = !!appLatest && newerThan(appLatest.version, app.getVersion())
+    const scriptNew = !!scriptLatest && newerThan(scriptLatest.version, collector.version)
+    let installing = false
+    if (appNew) installing = await offerAppUpdate(appLatest, manual)
+    if (scriptNew && !installing) await offerScriptUpdate(scriptLatest, manual)
+    if (manual && !appNew && !scriptNew) {
+      const errs = [errText(appRes) && '软件：' + errText(appRes), errText(scriptRes) && '采集脚本：' + errText(scriptRes)].filter(Boolean)
+      if (errs.length === 2) {
+        dialog.showErrorBox('检查更新失败', '连不上更新服务器：\n' + errs.join('\n') + '\n\n可以稍后再试，或在「帮助」里打开下载页手动下载。')
+      } else {
+        await showBox({
+          type: 'info',
+          message: '已是最新版本',
+          detail: '软件 v' + app.getVersion() + ' · 采集脚本 v' + collector.version + (errs.length ? '\n\n部分检查失败：' + errs[0] : ''),
+        })
+      }
     }
-    if (manual || readJson(settingsFile()).skipVersion !== latest.version) {
-      const r = await showBox({
-        type: 'info',
-        buttons: ['下载新版', '稍后', '跳过这个版本'],
-        defaultId: 0,
-        cancelId: 1,
-        message: '发现新版本 v' + latest.version,
-        detail:
-          '当前版本 v' + current + (latest.notes ? '\n\n' + latest.notes : '') +
-          '\n\n下载后关闭旧版再运行新版即可，密钥、设置、登录状态和去重库都会保留。',
-      })
-      if (r.response === 0) shell.openExternal(latest.url)
-      if (r.response === 2) patchSettings({ skipVersion: latest.version })
-    }
-    return { current, latest: latest.version, update: true }
-  } catch (e) {
-    if (manual) dialog.showErrorBox('检查更新失败', '连不上更新服务器：' + String(e && e.message ? e.message : e) + '\n\n可以稍后再试，或在「帮助」里打开下载页手动下载。')
-    return { error: String(e && e.message ? e.message : e) }
+    return { app: app.getVersion(), script: collector.version, appUpdate: appNew, scriptUpdate: scriptNew }
   } finally {
     updateBusy = false
   }
@@ -246,8 +402,8 @@ let updateTimer = null
 function scheduleUpdateChecks() {
   clearInterval(updateTimer)
   if (readJson(settingsFile()).autoUpdate === false) return
-  setTimeout(() => checkUpdate(false), 8000)
-  updateTimer = setInterval(() => checkUpdate(false), UPDATE_EVERY_MS)
+  setTimeout(() => checkAll(false), 8000)
+  updateTimer = setInterval(() => checkAll(false), UPDATE_EVERY_MS)
 }
 
 const siteWins = new Set()
@@ -584,7 +740,7 @@ function buildMenu() {
       {
         label: '帮助',
         submenu: [
-          { label: '检查更新…', click: () => checkUpdate(true) },
+          { label: '检查更新（软件 + 采集脚本）…', click: () => checkAll(true) },
           { label: '打开下载页', click: () => shell.openExternal(RELEASE_PAGE) },
           { label: '打开数据文件夹', click: () => shell.openPath(app.getPath('userData')) },
           { type: 'separator' },
@@ -838,7 +994,7 @@ ipcMain.handle('ui:app-prefs-set', (_e, patch) => {
   scheduleUpdateChecks()
   return true
 })
-ipcMain.handle('ui:update-check', () => (unlocked ? checkUpdate(true) : null))
+ipcMain.handle('ui:update-check', () => (unlocked ? checkAll(true) : null))
 ipcMain.handle('ui:open-release', () => unlocked && shell.openExternal(RELEASE_PAGE))
 ipcMain.handle('ui:windows', () => (unlocked ? windowList() : []))
 ipcMain.handle('ui:win-focus', (_e, id) => {
