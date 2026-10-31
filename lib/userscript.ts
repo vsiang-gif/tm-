@@ -27,6 +27,9 @@ const VN: Keywords = ['áo thun đen nam in hình', 'áo thun đen nữ in hình
 const ID: Keywords = ['kaos hitam pria sablon', 'kaos hitam wanita sablon']
 const TW: Keywords = ['黑色印花T恤 男', '黑色印花T恤 女']
 const BR: Keywords = ['camiseta preta masculina estampada', 'camiseta preta feminina estampada']
+const NL: Keywords = ['zwart t-shirt heren print', 'zwart t-shirt dames print']
+const PL: Keywords = ['czarna koszulka męska z nadrukiem', 'czarna koszulka damska z nadrukiem']
+const SE: Keywords = ['svart t-shirt herr tryck', 'svart t-shirt dam tryck']
 
 function site(p: Platform, code: string, name: string, origin: string, lang: string, kw: Keywords, prefix = ''): Site {
   return { id: p + '-' + code, p, name, origin, prefix, lang, men: kw[0], women: kw[1] }
@@ -43,6 +46,9 @@ export const SITES: Site[] = [
   site('temu', 'es', '西班牙', 'https://www.temu.com', '西班牙文', ES, 'es'),
   site('temu', 'mx', '墨西哥', 'https://www.temu.com', '西班牙文', MX, 'mx'),
   site('temu', 'jp', '日本', 'https://www.temu.com', '日文', JP, 'jp'),
+  site('temu', 'nl', '荷兰', 'https://www.temu.com', '荷兰文', NL, 'nl'),
+  site('temu', 'pl', '波兰', 'https://www.temu.com', '波兰文', PL, 'pl'),
+  site('temu', 'se', '瑞典', 'https://www.temu.com', '瑞典文', SE, 'se'),
 
   site('shein', 'us', '美国', 'https://us.shein.com', '英文', EN),
   site('shein', 'uk', '英国', 'https://www.shein.co.uk', '英文', EN),
@@ -54,6 +60,9 @@ export const SITES: Site[] = [
   site('shein', 'es', '西班牙', 'https://es.shein.com', '西班牙文', ES),
   site('shein', 'mx', '墨西哥', 'https://www.shein.com.mx', '西班牙文', MX),
   site('shein', 'hk', '香港', 'https://www.shein.com.hk', '英文', EN),
+  site('shein', 'nl', '荷兰', 'https://nl.shein.com', '荷兰文', NL),
+  site('shein', 'pl', '波兰', 'https://pl.shein.com', '波兰文', PL),
+  site('shein', 'se', '瑞典', 'https://www.shein.se', '瑞典文', SE),
 
   site('etsy', 'us', '全球', 'https://www.etsy.com', '英文', EN),
   site('etsy', 'uk', '英国', 'https://www.etsy.com', '英文', EN, 'uk'),
@@ -70,6 +79,9 @@ export const SITES: Site[] = [
   site('amazon', 'es', '西班牙', 'https://www.amazon.es', '西班牙文', ES),
   site('amazon', 'mx', '墨西哥', 'https://www.amazon.com.mx', '西班牙文', MX),
   site('amazon', 'jp', '日本', 'https://www.amazon.co.jp', '日文', JP),
+  site('amazon', 'nl', '荷兰', 'https://www.amazon.nl', '荷兰文', NL),
+  site('amazon', 'pl', '波兰', 'https://www.amazon.pl', '波兰文', PL),
+  site('amazon', 'se', '瑞典', 'https://www.amazon.se', '瑞典文', SE),
 
   site('shopee', 'sg', '新加坡', 'https://shopee.sg', '英文', EN),
   site('shopee', 'my', '马来西亚', 'https://shopee.com.my', '英文', EN),
@@ -213,8 +225,8 @@ const COLLECTOR_BODY = String.raw`
   var RETRY_RE = /^(再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var MORE_RE = /^(查看更多|显示更多|更多商品|加载更多|See more|Show more|Load more|View more|Mehr anzeigen|Voir plus|Ver más|Ver mais|Mostra altro|もっと見る|Xem thêm|Lihat lainnya|ดูเพิ่มเติม|再试一次|重试|重新加载|再試一次|Try again|Retry|Reload|Erneut versuchen|Nochmal versuchen|Réessayer|Reintentar|Volver a intentar|Tentar novamente|Riprova|もう一度|再試行|Thử lại|Coba lagi|ลองอีกครั้ง)/i;
   var NEXT_SEL = 'a[rel="next"], .s-pagination-next:not(.s-pagination-disabled), a[aria-label*="next page" i], button[aria-label*="next page" i], .shopee-mini-page-controller__next-btn, .shopee-icon-button--right:not(.shopee-icon-button--disabled), li.ant-pagination-next:not(.ant-pagination-disabled) > *, li.comet-pagination-next:not(.comet-pagination-disabled) > *';
-  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]/i;
-  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]/i;
+  var BLACK_RE = /黑|black|schwarz|noir|negr[ao]|ner[ao]|zwart|czarn|黒|ブラック|ดำ|đen|hitam|pret[ao]|svart/i;
+  var WHITE_RE = /白|white|weiß|weiss|blanc|blanc[ao]s?|bianc[ao]|bianche|bianchi|witte?\b|biał|ホワイト|ขาว|trắng|putih|branc[ao]|\bvit(a|t)?\b/i;
   // Washed / acid-wash / garment-dyed tees: faded charcoal body, mottled texture, lighter collar and seams.
   var WASH_RE = /水洗|做旧|酸洗|石洗|雪花洗|炒色|褪色|washed|acid\s*-?\s*wash|stone\s*-?\s*wash|snow\s*-?\s*wash|vintage\s*wash|garment\s*-?\s*dyed|pigment\s*-?\s*dyed|faded|distressed|gewaschen|délavé|delave|lavado|lavata|slavato|sprane|ウォッシュ|加工/i;
   // Apparel categories. Every category follows the shared color mode (black / white / rotate).
@@ -251,7 +263,7 @@ const COLLECTOR_BODY = String.raw`
   var TO_WHITE = [['schwarzes', 'weißes'], ['schwarze', 'weiße'], ['schwarz', 'weiß'], ['noire', 'blanche'], ['noir', 'blanc'],
     ['negras', 'blancas'], ['negros', 'blancos'], ['negra', 'blanca'], ['negro', 'blanco'], ['nere', 'bianche'], ['neri', 'bianchi'],
     ['nera', 'bianca'], ['nero', 'bianco'], ['pretas', 'brancas'], ['pretos', 'brancos'], ['preta', 'branca'], ['preto', 'branco'],
-    ['zwarte', 'witte'], ['zwart', 'wit'], ['czarne', 'białe'], ['czarny', 'biały'], ['czarna', 'biała'], ['hitam', 'putih'],
+    ['zwarte', 'witte'], ['zwart', 'wit'], ['czarne', 'białe'], ['czarny', 'biały'], ['czarna', 'biała'], ['svarta', 'vita'], ['svart', 'vit'], ['hitam', 'putih'],
     ['đen', 'trắng'], ['ดำ', 'ขาว'], ['ブラック', 'ホワイト'], ['黒', '白'], ['黑', '白'], ['black', 'white']];
   var FEMALE_WORDS = ['女装', '女士', '女款', '女式', '女性', '女生', '女', "women's", 'womens', 'women', 'woman', 'ladies', 'lady', 'female', 'damen', 'femme', 'mujer', 'donna', 'feminina', 'wanita', 'レディース'];
   var MALE_WORDS = ['男装', '男士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'masculina', 'pria', 'メンズ'];
@@ -261,7 +273,7 @@ const COLLECTOR_BODY = String.raw`
     minSales: 20, target: 60, maxPages: 5, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
     enterStore: false, storeCount: 3, storeTarget: 30,
     handoff: 'alt1', clickGap: 3, saveOriginal: false, aiCheck: true, aiVision: true,
-    skipWords: DEFAULT_SKIP.join('，'), removeWords: DEFAULT_REMOVE.join('，'),
+    skipWords: DEFAULT_SKIP.join('，'), removeWords: DEFAULT_REMOVE.join('，'), mustWords: '', maxSales: 0,
     sites: {}, v: 6,
     imgDedupe: true, schedule: '', dailyCap: 0, restEvery: 30, restMin: 3, autoResume: true,
     pushType: 'none', pushKey: '', beep: true, reportTime: '22:00',
@@ -323,7 +335,7 @@ const COLLECTOR_BODY = String.raw`
   var lastProgress = Date.now(), waitingHuman = false, resting = false;
   var queue = [], working = 0, running = false;
   var stats = { found: 0, candidates: 0, skipped: 0, saved: 0, failed: 0, dup: 0 };
-  var skipList = [], removeList = [], femaleList = [], maleList = [];
+  var skipList = [], removeList = [], mustList = [], femaleList = [], maleList = [];
 
   function save() { GM_setValue('cfg', cfg); }
   function rawSleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -388,7 +400,7 @@ const COLLECTOR_BODY = String.raw`
     return plain || fallback;
   }
   var TEMU_CUR = { us: 'USD', uk: 'GBP', ca: 'CAD', au: 'AUD', de: 'EUR', fr: 'EUR', it: 'EUR', es: 'EUR', mx: 'MXN', jp: 'JPY' };
-  var TEMU_CN = { '美国': 'us', '英国': 'uk', '加拿大': 'ca', '澳大利亚': 'au', '德国': 'de', '法国': 'fr', '意大利': 'it', '西班牙': 'es', '墨西哥': 'mx', '日本': 'jp' };
+  var TEMU_CN = { '美国': 'us', '英国': 'uk', '加拿大': 'ca', '澳大利亚': 'au', '德国': 'de', '法国': 'fr', '意大利': 'it', '西班牙': 'es', '墨西哥': 'mx', '日本': 'jp', '荷兰': 'nl', '波兰': 'pl', '瑞典': 'se' };
   function temuRealRegion() {
     var txt = (document.body && document.body.textContent) || '';
     var m = txt.match(/所在站点为\s*Temu\s*([\u4e00-\u9fa5]{2,4})/);
@@ -444,6 +456,7 @@ const COLLECTOR_BODY = String.raw`
   function compileRules() {
     skipList = compile(splitWords(cfg.skipWords));
     removeList = compile(splitWords(cfg.removeWords));
+    mustList = compile(splitWords(cfg.mustWords));
     femaleList = compile(FEMALE_WORDS);
     maleList = compile(MALE_WORDS);
   }
@@ -1181,7 +1194,9 @@ const COLLECTOR_BODY = String.raw`
   function dayStats(d) { return GM_getValue('daily', {})[d || today()] || emptyDay(); }
   function reasonGroup(r) {
     r = String(r || '');
-    return /违规/.test(r) ? '违规内容' : /IP|品牌/.test(r) ? 'IP/品牌' : /双面|印花面数|袖子有印花/.test(r) ? '印花面数' : /太满/.test(r) ? '印花太满' : /品类|水洗|纯棉/.test(r) ? '品类不对' : /黑色|颜色/.test(r) ? '非黑色' : /标题含/.test(r) ? '跳过词' : '其他';
+    return /违规/.test(r) ? '违规内容' : /IP|品牌/.test(r) ? 'IP/品牌' : /多件|叠放|不同颜色衣服/.test(r) ? '多件装' : /纯色|无图案/.test(r) ? '纯色无图案' :
+      /双面|印花面数|袖子有印花/.test(r) ? '印花面数' : /太满/.test(r) ? '印花太满' : /品类|水洗|纯棉/.test(r) ? '品类不对' :
+      /白色/.test(r) ? '非白色' : /黑色|颜色|炭灰/.test(r) ? '非黑色' : /标题含/.test(r) ? '跳过词' : '其他';
   }
   function bump(kind, site, reason) {
     var all = GM_getValue('daily', {}), d = today(), s = Object.assign(emptyDay(), all[d]);
@@ -1194,6 +1209,10 @@ const COLLECTOR_BODY = String.raw`
     GM_setValue('daily', all);
   }
   function capReached() { return cfg.dailyCap > 0 && dayStats().saved >= cfg.dailyCap; }
+  function passRate(s) {
+    var reviewed = s.saved + s.skipped;
+    return reviewed ? Math.round(s.saved * 100 / reviewed) + '%' : '-';
+  }
   function joinMap(m) { return Object.keys(m).map(function (k) { return k + ' ' + m[k]; }).join('、') || '无'; }
   function reportText(d) {
     var s = dayStats(d);
@@ -1202,16 +1221,17 @@ const COLLECTOR_BODY = String.raw`
       '去重拦截（没花灵豆）：' + s.dup + ' 张',
       '审核跳过：' + s.skipped + ' 张',
       '失败：' + s.failed,
+      '审核通过率：' + passRate(s),
       '各站点：' + joinMap(s.sites),
       '跳过原因：' + joinMap(s.reasons),
       '去重库累计已同步：' + synced.size + ' 张'].join('\n');
   }
   function exportReport() {
     var all = GM_getValue('daily', {});
-    var rows = [['日期', '已同步', '去重拦截', '审核跳过', '失败', '各站点', '跳过原因'].join(',')];
+    var rows = [['日期', '已同步', '去重拦截', '审核跳过', '失败', '审核通过率', '各站点', '跳过原因'].join(',')];
     Object.keys(all).sort().reverse().forEach(function (d) {
       var s = Object.assign(emptyDay(), all[d]);
-      rows.push([d, s.saved, s.dup, s.skipped, s.failed, joinMap(s.sites), joinMap(s.reasons)].map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(','));
+      rows.push([d, s.saved, s.dup, s.skipped, s.failed, passRate(s), joinMap(s.sites), joinMap(s.reasons)].map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(','));
     });
     var url = URL.createObjectURL(new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv' }));
     GM_download({ url: url, name: '爆款图案/采集日报_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
@@ -1383,6 +1403,16 @@ const COLLECTOR_BODY = String.raw`
         stats.skipped++;
         ctx.lowSales = (ctx.lowSales || 0) + 1;
         markCard(x.el, 'warn', '不采：' + x.salesText + '，低于最低销量 ' + cfg.minSales);
+        return;
+      }
+      if (!x.noMetric && cfg.maxSales > 0 && x.salesCount > cfg.maxSales) {
+        stats.skipped++;
+        markCard(x.el, 'warn', '不采：' + x.salesText + '，高于最高销量 ' + cfg.maxSales);
+        return;
+      }
+      if (mustList.length && !findHit(x.title, mustList)) {
+        stats.skipped++;
+        markCard(x.el, 'warn', '不采：标题不含任何必含词');
         return;
       }
       var hit = findHit(x.title, skipList);
@@ -1633,7 +1663,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.35.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.36.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -1687,7 +1717,7 @@ const COLLECTOR_BODY = String.raw`
     if (t.type === 'goods') {
       var soldOut = function () {
         var txt = ((document.body && document.body.innerText) || '').slice(0, 4000);
-        return /此商品已售罄|商品��下架|已售罄|This item is sold out|Sold out|no longer available|Ausverkauft|Épuisé|Esaurito|Agotado|Esgotado|売り切れ/i.test(txt);
+        return /此商品已售罄|商品已下架|已售罄|This item is sold out|Sold out|no longer available|Ausverkauft|Épuisé|Esaurito|Agotado|Esgotado|売り切れ/i.test(txt);
       };
       await waitFor(function () { return findStoreLink() || soldOut(); }, 15000);
       if (soldOut()) { log('商品 ' + t.goodsId + ' 已售罄/下架，跳过进店'); ensureReturn(t, job); return; }
@@ -2333,12 +2363,20 @@ const COLLECTOR_BODY = String.raw`
     save(); syncSites();
     log('豆包推荐：' + ids.filter(function (id) { return cfg.sites[id]; }).map(function (id) { return siteLabel(siteBy(id)); }).join('、') + (r.reason ? '。' + r.reason : ''));
   }
-  function exportCsv() {
+  function localDay(iso) {
+    var t = new Date(iso);
+    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+  }
+  function exportCsv(todayOnly) {
+    records = GM_getValue('records', []);
+    var day = today();
+    var list = todayOnly === true ? records.filter(function (r) { return r.time && localDay(r.time) === day; }) : records;
+    if (!list.length) { log(todayOnly === true ? '今天还没有采集记录' : '还没有采集记录', true); return; }
     var cols = ['status', 'reason', 'country', 'source', 'goodsId', 'title', 'cleanTitle', 'sales', 'salesCount', 'productUrl', 'imageUrl', 'files', 'time'];
     var head = ['状态', '原因/备注', '平台站点', '来源', '商品ID', '原标题', '清洗后标题', '销量', '销量数值', '商品链接', '图片链接', '文件', '时间'];
-    var rows = [head.join(',')].concat(records.map(function (r) { return cols.map(function (k) { return '"' + String(r[k] == null ? '' : r[k]).replace(/"/g, '""') + '"'; }).join(','); }));
+    var rows = [head.join(',')].concat(list.map(function (r) { return cols.map(function (k) { return '"' + String(r[k] == null ? '' : r[k]).replace(/"/g, '""') + '"'; }).join(','); }));
     var url = URL.createObjectURL(new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv' }));
-    GM_download({ url: url, name: '爆款图案/�������集记录_' + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
+    GM_download({ url: url, name: '爆款图案/采集记录_' + (todayOnly === true ? '今日_' : '') + today() + '.csv', saveAs: false, onload: function () { URL.revokeObjectURL(url); } });
   }
 
   // ---------- panel ----------
@@ -2407,7 +2445,7 @@ const COLLECTOR_BODY = String.raw`
             '<input data-k="kwRandCount" type="number" min="1" max="100" style="' + inputCss + ';width:64px" aria-label="生成个数">' +
             '<button data-k="randKw" style="' + btnCss + '">随机生成</button>' +
           '</div>' +
-          check('kwAutoRand', '每次「开始多站点采集」前自动追加一��新随机词') +
+          check('kwAutoRand', '每次「开始多站点采集」前自动追加一批新随机词') +
           check('autoPick', '勾选站点后自动打开该站并输入关键词开始采集') +
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span data-k="kwHistInfo" style="font-size:11px;opacity:.7"></span><button data-k="clearKwHist" style="' + linkCss + ';font-size:11px">清空生成记录</button></div>' +
           hint('随机词在本地组合（颜色 + 主题 + 印花 + T 恤 + 男女），不花灵豆也不花豆包费用；所有生成过的词都会记录，词序不同也算重复，永远不会再生成同一个词。') +
@@ -2429,7 +2467,9 @@ const COLLECTOR_BODY = String.raw`
         '</div>' +
         '<div data-pane="filter" style="display:none">' +
           check('noPlain', '不采纯色款（纯黑 / 纯白 / 素色），必须有印花图案') +
-          row(field('印花占比下限 %（低于算纯色）', input('printMin', 'type="number" min="0" max="50" step="0.5"')), '<span style="flex:1"></span>') +
+          row(field('印花占比下限 %（低于算纯色）', input('printMin', 'type="number" min="0" max="50" step="0.5"')), field('最高销量（0 = 不限）', input('maxSales', 'type="number" min="0"'))) +
+          hint('设了最高销量就只采还没卖爆的潜力款，避开已经被大量跟卖的老爆款。') +
+          field('必含词（标题至少含一个才采，留空 = 不限）', '<textarea data-k="mustWords" rows="2" style="' + inputCss + ';resize:vertical" placeholder="如：skull，vintage，gothic"></textarea>') +
           '<div style="font-weight:600;margin:6px 0 4px">印花数量（可多选）</div>' +
           check('printOne', '单个印花（只有前面或只有后面一个印花）') +
           check('printTwo', '两个印花（前 + 后，或 一面 + 袖子）') +
@@ -2470,7 +2510,7 @@ const COLLECTOR_BODY = String.raw`
       '<div style="display:flex;gap:6px;margin:10px 0 6px"><button data-k="start" style="' + btnCss + ';border:0;background:' + C.blue + ';color:#fff">开始多站点采集</button>' +
         '<button data-k="here" style="' + btnCss + '">只采当前页</button></div>' +
       '<div style="display:flex;gap:6px;margin-bottom:6px"><button data-k="store" style="' + btnCss + ';display:none">进入本店采集</button>' +
-        '<button data-k="pause" style="' + btnCss + '">暂停</button><button data-k="end" style="' + btnCss + '">结束任务</button><button data-k="csv" style="' + btnCss + '">导出 CSV</button></div>' +
+        '<button data-k="pause" style="' + btnCss + '">暂停</button><button data-k="end" style="' + btnCss + '">结束任务</button><button data-k="csv" style="' + btnCss + '">导出 CSV</button><button data-k="csvToday" style="' + btnCss + '">今日 CSV</button></div>' +
       '<div data-k="job" style="font-size:12px;color:' + C.dim + '"></div>' +
       '<div data-k="today" style="margin-top:4px;font-size:12px;color:' + C.text + '"></div>' +
       '<div data-k="stats" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px;color:' + C.dim + '"></div>' +
@@ -2544,7 +2584,7 @@ const COLLECTOR_BODY = String.raw`
   $('previewKw').onclick = function () { previewKeywords().catch(function (e) { log(e.message, true); }); };
   $('copyKw').onclick = copyScopeToOthers;
 
-  ['arkKey', 'arkModel', 'skipWords', 'removeWords', 'handoff', 'schedule', 'reportTime', 'pushType', 'pushKey', 'colorMode'].forEach(function (k) {
+  ['arkKey', 'arkModel', 'skipWords', 'removeWords', 'mustWords', 'handoff', 'schedule', 'reportTime', 'pushType', 'pushKey', 'colorMode'].forEach(function (k) {
     $(k).value = cfg[k];
     $(k).onchange = function () {
       var v = $(k).value.trim();
@@ -2555,7 +2595,7 @@ const COLLECTOR_BODY = String.raw`
       if (k === 'schedule') log(v ? '定时开工：' + v : '已关闭定时开工');
     };
   });
-  ['minSales', 'target', 'maxPages', 'storeCount', 'storeTarget', 'darkMin', 'clickGap', 'dailyCap', 'restEvery', 'restMin', 'storeMinSales', 'blackCount', 'whiteCount', 'lightMin', 'printMin'].forEach(function (k) {
+  ['minSales', 'target', 'maxPages', 'storeCount', 'storeTarget', 'darkMin', 'clickGap', 'dailyCap', 'restEvery', 'restMin', 'storeMinSales', 'blackCount', 'whiteCount', 'lightMin', 'printMin', 'maxSales'].forEach(function (k) {
     $(k).value = cfg[k];
     $(k).onchange = function () { var v = parseInt($(k).value, 10); cfg[k] = isFinite(v) && v >= 0 ? v : DEFAULTS[k]; $(k).value = cfg[k]; save(); render(); };
   });
@@ -2732,7 +2772,7 @@ const COLLECTOR_BODY = String.raw`
     if (starting) return;
     var names = ids.map(function (id) { return siteLabel(siteBy(id)); }).join('、');
     if (getJob()) {
-      if (!confirm('当前有采集任务在进行。结束它，改为打开「' + names + '」并开始采集吗？')) { log('已勾选「' + names + '」，会在下��「开始多站点采集」时一起采'); return; }
+      if (!confirm('当前有采集任务在进行。结束它，改为打开「' + names + '」并开始采集吗？')) { log('已勾选「' + names + '」，会在下次「开始多站点采集」时一起采'); return; }
       running = false; queue.length = 0; setJob(null);
     }
     if (!preflight()) return;
@@ -2742,7 +2782,7 @@ const COLLECTOR_BODY = String.raw`
     try {
       var tasks = await buildTasks(ids);
       if (!tasks.length) { showTab('country'); log('「' + names + '」还没有关键词，请先填写或点「自动生成」', true); return; }
-      log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个���键���');
+      log('已选「' + names + '」，正在打开网站并搜索「' + tasks[0].keyword + '」，共 ' + tasks.length + ' 个关键词');
       startJob(withUserFirst(tasks));
     } finally { starting = false; render(); }
   }
@@ -2765,7 +2805,8 @@ const COLLECTOR_BODY = String.raw`
     else { j.paused = false; setJob(j); runJob(); }
   };
   $('end').onclick = function () { running = false; queue.length = 0; setJob(null); log('任务已结束'); render(); };
-  $('csv').onclick = exportCsv;
+  $('csv').onclick = function () { exportCsv(false); };
+  $('csvToday').onclick = function () { exportCsv(true); };
 
   function log(msg, err) {
     var line = document.createElement('div');
@@ -2867,7 +2908,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.35.0',
+    '// @version      6.36.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',

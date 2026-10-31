@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, session, Notification, Menu, dialog, net, safeStorage } = require('electron')
+const { app, BrowserWindow, WebContentsView, ipcMain, session, Notification, Menu, dialog, net, safeStorage, shell, screen } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -30,7 +30,9 @@ const menuCommands = new Map()
 // Keep the pre-rename data folder so saved keys, settings, logins and the dedupe DB survive the MT采集器 rename.
 app.setPath('userData', path.join(app.getPath('appData'), '爆款图案采集器'))
 
-if (!app.requestSingleInstanceLock()) app.quit()
+// Without the guard a second copy still ran whenReady and flashed its own lock window before quitting.
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) app.quit()
 
 app.userAgentFallback = app.userAgentFallback
   .split(' ')
@@ -167,7 +169,136 @@ function enterApp(key) {
   Promise.allSettled((settings.extensions || []).map(loadExtension)).finally(() => {
     createLauncher()
     lockWin?.close()
+    scheduleUpdateChecks()
   })
+}
+
+const RELEASE_API = 'https://api.github.com/repos/vsiang-gif/tm-/releases/tags/desktop-latest'
+const RELEASE_PAGE = 'https://github.com/vsiang-gif/tm-/releases/tag/desktop-latest'
+const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000
+
+function patchSettings(patch) {
+  const settings = { ...readJson(settingsFile()), ...patch }
+  fs.writeFileSync(settingsFile(), JSON.stringify(settings))
+  return settings
+}
+
+function newerThan(a, b) {
+  const pa = String(a).split('.').map(Number)
+  const pb = String(b).split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0)
+  }
+  return false
+}
+
+async function fetchLatest() {
+  const res = await net.fetch(RELEASE_API, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'MT-Collector' } })
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  const rel = await res.json()
+  const assets = Array.isArray(rel.assets) ? rel.assets : []
+  const pick = (re) => assets.find((a) => re.test(a.name))
+  const asset = (process.env.PORTABLE_EXECUTABLE_FILE ? pick(/portable\.exe$/i) : pick(/setup\.exe$/i)) || pick(/\.exe$/i)
+  const m = asset && asset.name.match(/(\d+\.\d+\.\d+)/)
+  return m ? { version: m[1], url: asset.browser_download_url, notes: String(rel.body || '').slice(0, 800) } : null
+}
+
+function showBox(opts) {
+  const parent = BrowserWindow.getFocusedWindow()
+  return parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts)
+}
+
+let updateBusy = false
+async function checkUpdate(manual) {
+  if (updateBusy) return { busy: true }
+  updateBusy = true
+  const current = app.getVersion()
+  try {
+    const latest = await fetchLatest()
+    if (!latest || !newerThan(latest.version, current)) {
+      if (manual) await showBox({ type: 'info', message: '已是最新版本', detail: '当前版本 v' + current })
+      return { current, latest: latest ? latest.version : current, update: false }
+    }
+    if (manual || readJson(settingsFile()).skipVersion !== latest.version) {
+      const r = await showBox({
+        type: 'info',
+        buttons: ['下载新版', '稍后', '跳过这个版本'],
+        defaultId: 0,
+        cancelId: 1,
+        message: '发现新版本 v' + latest.version,
+        detail:
+          '当前版本 v' + current + (latest.notes ? '\n\n' + latest.notes : '') +
+          '\n\n下载后关闭旧版再运行新版即可，密钥、设置、登录状态和去重库都会保留。',
+      })
+      if (r.response === 0) shell.openExternal(latest.url)
+      if (r.response === 2) patchSettings({ skipVersion: latest.version })
+    }
+    return { current, latest: latest.version, update: true }
+  } catch (e) {
+    if (manual) dialog.showErrorBox('检查更新失败', '连不上更新服务器：' + String(e && e.message ? e.message : e) + '\n\n可以稍后再试，或在「帮助」里打开下载页手动下载。')
+    return { error: String(e && e.message ? e.message : e) }
+  } finally {
+    updateBusy = false
+  }
+}
+
+let updateTimer = null
+function scheduleUpdateChecks() {
+  clearInterval(updateTimer)
+  if (readJson(settingsFile()).autoUpdate === false) return
+  setTimeout(() => checkUpdate(false), 8000)
+  updateTimer = setInterval(() => checkUpdate(false), UPDATE_EVERY_MS)
+}
+
+const siteWins = new Set()
+const winNo = new Map()
+let winSeq = 0
+let menuTimer = null
+function scheduleMenu() {
+  clearTimeout(menuTimer)
+  menuTimer = setTimeout(buildMenu, 150)
+}
+
+function liveSiteWins() {
+  return Array.from(siteWins).filter((w) => !w.isDestroyed())
+}
+
+function windowList() {
+  return liveSiteWins().map((w) => ({ id: w.id, no: winNo.get(w.id), title: w.webContents.getTitle() || w.webContents.getURL() }))
+}
+
+function tileSiteWindows() {
+  const wins = liveSiteWins()
+  if (!wins.length) return 0
+  const wa = screen.getDisplayMatching(wins[0].getBounds()).workArea
+  const cols = Math.ceil(Math.sqrt(wins.length))
+  const rows = Math.ceil(wins.length / cols)
+  const w = Math.floor(wa.width / cols)
+  const h = Math.floor(wa.height / rows)
+  wins.forEach((win, i) => {
+    if (win.isMinimized()) win.restore()
+    if (win.isMaximized()) win.unmaximize()
+    win.setBounds({ x: wa.x + (i % cols) * w, y: wa.y + Math.floor(i / cols) * h, width: w, height: h })
+  })
+  return wins.length
+}
+
+function duplicateWindow(win) {
+  const url = win && siteWins.has(win) && !win.isDestroyed() ? win.webContents.getURL() : ''
+  if (url && /^https?:/i.test(url)) openSite(url, '')
+  else createLauncher()
+}
+
+function actAll(k) {
+  let n = 0
+  for (const w of liveSiteWins()) {
+    const wc = w.webContents
+    if (!wc.isDestroyed() && tokens.has(wc.id)) {
+      wc.send('gm:panel-act', { t: 'key', k })
+      n++
+    }
+  }
+  return n
 }
 
 function uiPrefs() {
@@ -218,11 +349,26 @@ function createLauncher() {
 function wireSiteWindow(win) {
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (!/^https?:/i.test(url)) return { action: 'deny' }
-    return { action: 'allow', overrideBrowserWindowOptions: { width: 1400, height: 900, webPreferences: sitePrefs() } }
+    return { action: 'allow', overrideBrowserWindowOptions: { width: 1400, height: 900, backgroundColor: '#ffffff', webPreferences: sitePrefs() } }
   })
   win.webContents.on('did-create-window', wireSiteWindow)
   const siteId = win.webContents.id
+  const winId = win.id
   lastSite = win.webContents
+  siteWins.add(win)
+  winNo.set(winId, ++winSeq)
+  win.on('page-title-updated', (e, title) => {
+    e.preventDefault()
+    win.setTitle('#' + winNo.get(winId) + ' ' + title)
+    scheduleMenu()
+  })
+  win.on('closed', () => {
+    siteWins.delete(win)
+    winNo.delete(winId)
+    if (!siteWins.size) winSeq = 0
+    scheduleMenu()
+  })
+  scheduleMenu()
   win.on('focus', () => {
     if (!win.isDestroyed()) lastSite = win.webContents
   })
@@ -325,7 +471,18 @@ const autoActFor = new Map()
 const AUTO_ACTIONS = new Set(['here', 'start'])
 
 function openSite(url, autoAct) {
-  const win = new BrowserWindow({ width: 1400, height: 900, backgroundColor: '#ffffff', webPreferences: sitePrefs() })
+  const wa = screen.getPrimaryDisplay().workArea
+  const step = (siteWins.size % 8) * 32
+  const width = Math.min(1400, wa.width)
+  const height = Math.min(900, wa.height)
+  const win = new BrowserWindow({
+    x: wa.x + Math.min(step, Math.max(0, wa.width - width)),
+    y: wa.y + Math.min(step, Math.max(0, wa.height - height)),
+    width,
+    height,
+    backgroundColor: '#ffffff',
+    webPreferences: sitePrefs(),
+  })
   if (AUTO_ACTIONS.has(autoAct)) autoActFor.set(win.id, autoAct)
   wireSiteWindow(win)
   win.loadURL(url)
@@ -386,6 +543,31 @@ function buildMenu() {
       },
       { label: '插件', submenu: [{ label: '加载灵图插件（解压目录）…', click: pickExtension }] },
       {
+        label: '窗口',
+        submenu: [
+          { label: '新建窗口（复制当前网页）', accelerator: 'CmdOrCtrl+N', click: (_i, w) => unlocked && duplicateWindow(w) },
+          { label: '平铺所有网页窗口', accelerator: 'CmdOrCtrl+Alt+T', click: tileSiteWindows },
+          { type: 'separator' },
+          { label: '所有窗口：只采当前页', click: () => actAll('here') },
+          { label: '所有窗口：暂停 / 继续', click: () => actAll('pause') },
+          { label: '所有窗口：结束任务', click: () => actAll('end') },
+          { type: 'separator' },
+          ...(windowList().length
+            ? windowList().map((w) => ({
+                label: '#' + w.no + ' ' + String(w.title).slice(0, 40),
+                click: () => {
+                  const win = BrowserWindow.fromId(w.id)
+                  if (!win) return
+                  if (win.isMinimized()) win.restore()
+                  win.focus()
+                },
+              }))
+            : [{ label: '（还没有打开网页窗口）', enabled: false }]),
+          { type: 'separator' },
+          { label: '关闭所有网页窗口', click: () => liveSiteWins().forEach((w) => w.close()) },
+        ],
+      },
+      {
         label: '视图',
         submenu: [
           { label: '后退', accelerator: 'Alt+Left', click: (_i, w) => w?.webContents.navigationHistory.goBack() },
@@ -397,6 +579,19 @@ function buildMenu() {
           { role: 'resetZoom', label: '实际大小' },
           { type: 'separator' },
           { role: 'toggleDevTools', label: '开发者工具' },
+        ],
+      },
+      {
+        label: '帮助',
+        submenu: [
+          { label: '检查更新…', click: () => checkUpdate(true) },
+          { label: '打开下载页', click: () => shell.openExternal(RELEASE_PAGE) },
+          { label: '打开数据文件夹', click: () => shell.openPath(app.getPath('userData')) },
+          { type: 'separator' },
+          {
+            label: '关于 MT采集器',
+            click: () => showBox({ type: 'info', message: 'MT采集器 v' + app.getVersion(), detail: '采集脚本 v' + collector.version + '\n数据目录：' + app.getPath('userData') }),
+          },
         ],
       },
     ]),
@@ -632,6 +827,34 @@ ipcMain.handle('ui:open', (_e, url, autoAct) => {
 
 ipcMain.handle('ui:extension', () => unlocked && pickExtension())
 
+ipcMain.handle('ui:app-prefs', () => {
+  if (!unlocked) return null
+  const s = readJson(settingsFile())
+  return { autoUpdate: s.autoUpdate !== false, version: app.getVersion(), script: collector.version }
+})
+ipcMain.handle('ui:app-prefs-set', (_e, patch) => {
+  if (!unlocked || !patch || typeof patch.autoUpdate !== 'boolean') return false
+  patchSettings({ autoUpdate: patch.autoUpdate })
+  scheduleUpdateChecks()
+  return true
+})
+ipcMain.handle('ui:update-check', () => (unlocked ? checkUpdate(true) : null))
+ipcMain.handle('ui:open-release', () => unlocked && shell.openExternal(RELEASE_PAGE))
+ipcMain.handle('ui:windows', () => (unlocked ? windowList() : []))
+ipcMain.handle('ui:win-focus', (_e, id) => {
+  const win = unlocked && BrowserWindow.fromId(Number(id))
+  if (!win || !siteWins.has(win)) return false
+  if (win.isMinimized()) win.restore()
+  win.focus()
+  return true
+})
+ipcMain.handle('ui:win-tile', () => (unlocked ? tileSiteWindows() : 0))
+ipcMain.handle('ui:act-all', (_e, k) => {
+  if (!unlocked || !['here', 'pause', 'end'].includes(k)) return { error: '不支持的操作' }
+  const n = actAll(k)
+  return n ? { ok: true, n } : { error: '还没有打开任何平台网页' }
+})
+
 ipcMain.on('gm:bootstrap', (e) => {
   const url = e.senderFrame?.url || ''
   if (!unlocked || !MATCHERS.some((re) => re.test(url))) {
@@ -727,6 +950,7 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(() => {
+  if (!gotLock) return
   values = readJson(dataFile())
   placePortableExeInAppHome()
   session.fromPartition(PARTITION).on('will-download', (_e, item) => {

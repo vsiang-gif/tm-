@@ -15,5 +15,13 @@ contextBridge.exposeInMainWorld('desktop', {
   defaults: () => ipcRenderer.invoke('ui:defaults'),
   kwHist: () => ipcRenderer.invoke('ui:kw-hist'),
   kwHistClear: () => ipcRenderer.invoke('ui:kw-hist-clear'),
+  appPrefs: () => ipcRenderer.invoke('ui:app-prefs'),
+  setAppPrefs: (patch) => ipcRenderer.invoke('ui:app-prefs-set', patch),
+  checkUpdate: () => ipcRenderer.invoke('ui:update-check'),
+  openRelease: () => ipcRenderer.invoke('ui:open-release'),
+  windows: () => ipcRenderer.invoke('ui:windows'),
+  focusWin: (id) => ipcRenderer.invoke('ui:win-focus', id),
+  tileWins: () => ipcRenderer.invoke('ui:win-tile'),
+  actAll: (k) => ipcRenderer.invoke('ui:act-all', k),
   onValuesChanged: (fn) => ipcRenderer.on('ui:values-changed', (_e, key) => fn(key)),
 })

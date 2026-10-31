@@ -92,7 +92,7 @@ const GROUPS = [
       txt('schedule', '', '定时开工（多个用逗号隔开，如 09:00,20:00）', { placeholder: '留空 = 不定时' }),
       row(num('dailyCap', 0, '每日最多同步（0 = 不限）'), txt('reportTime', '22:00', '日报推送时间')),
       row(num('restEvery', 50, '每采几张休息一次'), num('restMin', 2, '每次休息分钟')),
-      chk('autoResume', false, '遇到���证码 / 要登录 / 国家不对：提醒我，处理好后自动继续'),
+      chk('autoResume', false, '遇到验证码 / 要登录 / 国家不对：提醒我，处理好后自动继续'),
       chk('beep', true, '需要处理时电脑响提示音'),
       {
         k: 'pushType', t: 'select', d: 'none', label: '微信提醒',
@@ -113,12 +113,12 @@ const GROUPS = [
       txt('arkModel', 'doubao-seed-2-0-pro', '模型 / 接入点 ID', {
         hint: '填文字/看图模型，如 doubao-seed-2-0-pro、doubao-seed-2-0-lite。Seedance 2.0（视频）和 Seedream（画图）不能用于审核和翻译，填了会自动改回。',
       }),
-      chk('aiCheck', true, '���豆包审核每个商品（违规 / IP 侵权）'),
+      chk('aiCheck', true, '用豆包审核每个商品（违规 / IP 侵权）'),
       chk('aiVision', true, '审核时看图（双面 / 满印 / 颜色）'),
       head('采集同步（灵图插件 Alt+1）'),
       { t: 'ext' },
       {
-        k: 'handoff', t: 'select', d: 'alt1', label: '审核通��后',
+        k: 'handoff', t: 'select', d: 'alt1', label: '审核通过后',
         options: [['alt1', '自动按 Alt+1 采集并同步（推荐）'], ['click', '自动点「采集并同步」按钮'], ['mark', '只标绿框，我自己按 Alt+1']],
       },
       num('clickGap', 3, '每次采集间隔（秒）', { min: 1, hint: '不再使用灵图 API。如果 Alt+1 没反应，改选「自动点按钮」。' }),
@@ -128,6 +128,17 @@ const GROUPS = [
       chk('imgDedupe', true, '图案相似去重：不同卖家的同款图也不重复采'),
       { t: 'db' },
       act(['clear', '清空日志'], ['clearSynced', '清空去重库']),
+    ],
+  },
+  {
+    id: 'app',
+    name: '窗口/更新',
+    fields: [
+      head('多窗口同时采集'),
+      hint('每个网页窗口独立运行采集面板，共用同一份设置和去重库，不会重复同步。可以在不同窗口打开不同平台或不同搜索页，一起「只采当前页」。快捷键：Ctrl+N 复制当前网页到新窗口，Ctrl+Alt+T 平铺。'),
+      { t: 'windows' },
+      head('软件更新'),
+      { t: 'update' },
     ],
   },
 ]
@@ -257,7 +268,82 @@ async function patchSite(id, change) {
   await save({ sites })
 }
 
+let refreshWindows = null
+window.addEventListener('focus', () => current === 'app' && refreshWindows && refreshWindows())
+
 const CUSTOM = {
+  windows() {
+    const list = el('div', { class: 'chips' })
+    const info = el('p', { class: 'hint' }, '读取中…')
+    const refresh = async () => {
+      const wins = (await window.desktop.windows()) || []
+      info.textContent = wins.length ? '已打开 ' + wins.length + ' 个网页窗口，点一下切换过去：' : '还没有打开网页窗口，先在「站点」里点「打开」。'
+      list.replaceChildren(
+        ...wins.map((w) => {
+          const b = el('button', { type: 'button', title: w.title }, '#' + w.no + ' ' + String(w.title).slice(0, 24))
+          b.addEventListener('click', () => window.desktop.focusWin(w.id))
+          return b
+        }),
+      )
+    }
+    const button = (label, fn, primary) => {
+      const b = el('button', { type: 'button', class: primary ? null : 'ghost' }, label)
+      b.addEventListener('click', fn)
+      return b
+    }
+    const all = (k) => async () => {
+      const r = await window.desktop.actAll(k)
+      if (r && r.error) flash(r.error, true)
+      else flash('已发送到 ' + r.n + ' 个网页窗口')
+    }
+    const tile = button('平铺所有窗口', async () => {
+      const n = await window.desktop.tileWins()
+      flash(n ? '已平铺 ' + n + ' 个窗口' : '还没有打开网页窗口', !n)
+    })
+    refreshWindows = refresh
+    refresh()
+    return el(
+      'div',
+      { class: 'field' },
+      info,
+      list,
+      el('div', { class: 'row wrap' }, button('所有窗口只采当前页', all('here'), true), button('所有窗口暂停 / 继续', all('pause')), button('所有窗口结束', all('end')), tile, button('刷新列表', refresh)),
+    )
+  },
+
+  update() {
+    const info = el('p', { class: 'hint' }, '')
+    const id = 'f-autoUpdate'
+    const box = el('input', { type: 'checkbox', id })
+    window.desktop.appPrefs().then((p) => {
+      if (!p) return
+      box.checked = p.autoUpdate
+      info.textContent = '当前版本 v' + p.version + ' · 采集脚本 v' + p.script
+    })
+    box.addEventListener('change', async () => {
+      const ok = await window.desktop.setAppPrefs({ autoUpdate: box.checked })
+      flash(ok ? (box.checked ? '已开启自动检查更新' : '已关闭自动检查更新') : '保存失败', !ok)
+    })
+    const check = el('button', { type: 'button' }, '立即检查更新')
+    check.addEventListener('click', async () => {
+      check.disabled = true
+      check.textContent = '检查中…'
+      await window.desktop.checkUpdate()
+      check.disabled = false
+      check.textContent = '立即检查更新'
+    })
+    const page = el('button', { type: 'button', class: 'ghost' }, '打开下载页')
+    page.addEventListener('click', () => window.desktop.openRelease())
+    return el(
+      'div',
+      { class: 'field' },
+      info,
+      el('label', { class: 'check', for: id }, box, el('span', {}, '启动后和每 6 小时自动检查新版本')),
+      el('div', { class: 'row wrap' }, check, page),
+      el('p', { class: 'hint' }, '有新版时会弹窗提示，下载后关闭旧版再运行新版即可，密钥、设置、登录状态和去重库都会保留。'),
+    )
+  },
+
   openUrl() {
     const input = el('input', { id: 'f-openUrl', type: 'text', placeholder: '粘贴任意 Temu / SHEIN / Etsy / 速卖通 等网址', spellcheck: 'false' })
     const go = el('button', { type: 'button' }, '打开并采集')
@@ -312,7 +398,7 @@ const CUSTOM = {
     const onCount = ALL_SITES.filter((s) => s.p === kwScope() && siteEntry(s).on).length
     const info =
       category() === 'cotton'
-        ? pName + ' 所有国家共用这一份关键词，搜索时自动翻译成当地语言。' + (onCount ? '已���选 ' + onCount + ' 个站点。' : '还没勾选 ' + pName + ' 的站点')
+        ? pName + ' 所有国家共用这一份关键词，搜索时自动翻译成当地语言。' + (onCount ? '已勾选 ' + onCount + ' 个站点。' : '还没勾选 ' + pName + ' 的站点')
         : CATS[category()].name + ' 品类所有网站共用这一份关键词。留空 = 用内置词。'
     return el(
       'div',
