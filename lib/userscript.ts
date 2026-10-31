@@ -1663,7 +1663,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.37.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.38.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -2882,6 +2882,15 @@ const COLLECTOR_BODY = String.raw`
   if (getJob()) setTimeout(runJob, 2500);
 
   // Desktop app: the panel is rendered natively by the exe, so keep it off-page and mirror it over IPC.
+  // Desktop app: the panel stays in the page like Tampermonkey; the exe only sends shortcut keys (auto-start, all-window actions).
+  if (typeof TM_onPanelAct === 'function' && typeof TM_panelPush !== 'function') {
+    TM_onPanelAct(function (m) {
+      try {
+        if (m && m.t === 'key') { var kb = /^[A-Za-z]+$/.test(m.k) && host.querySelector('button[data-k="' + m.k + '"]'); if (kb) kb.click(); }
+      } catch (e) { log('面板操作失败：' + e.message, true); }
+    });
+  }
+  // Older desktop builds mirrored the panel into a native view.
   if (typeof TM_panelPush === 'function' && typeof TM_onPanelAct === 'function') {
     host.style.setProperty('left', '-100000px', 'important');
     host.style.setProperty('right', 'auto', 'important');
@@ -2952,7 +2961,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.37.0',
+    '// @version      6.38.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',

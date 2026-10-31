@@ -1,14 +1,15 @@
 {
   "name": "tm-collector",
   "productName": "MT采集器",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "MT采集器 Windows 桌面版（需密钥）",
   "main": "src/main.js",
   "scripts": {
     "build:script": "node scripts/build-script.mjs",
     "start": "npm run build:script && electron .",
-    "dist": "npm run build:script && electron-builder --win --x64 --publish never"
+    "dist": "npm run build:script && npm run fetch:lingtu && electron-builder --win --x64 --publish never",
+    "fetch:lingtu": "node scripts/fetch-lingtu.mjs"
   },
   "devDependencies": {
     "electron": "^45.0.0",
@@ -39,6 +40,15 @@
       "allowToChangeInstallationDirectory": true,
       "include": "build/installer.nsh",
       "shortcutName": "MT采集器"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "extensions",
+        "to": "extensions",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }

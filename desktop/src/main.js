@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, session, Notification, Menu, dialog, net, safeStorage, shell, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, session, Notification, Menu, dialog, net, safeStorage, shell, screen } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -6,6 +6,7 @@ const crypto = require('node:crypto')
 const { spawn } = require('node:child_process')
 // Mutable copy: a newer script downloaded at runtime replaces code/version without reinstalling the app.
 const collector = { ...require('./generated/collector.json') }
+const { LINGTU_NAME, manifestOf, downloadLingtu, pickLingtu } = require('./lingtu.js')
 const BUNDLED_SCRIPT_VERSION = collector.version
 
 // Several candidates so a single protected or renamed domain cannot lock every client out.
@@ -170,10 +171,14 @@ function enterApp(key) {
   startRecheck()
   loadScriptOverride()
   const settings = readJson(settingsFile())
-  Promise.allSettled((settings.extensions || []).map(loadExtension)).finally(() => {
+  const lingtu = settings.lingtu === false ? null : pickLingtu(bundledLingtuDir(), lingtuBaseDir())
+  // A manually loaded copy of 灵图 would inject a second floating ball next to the built-in one.
+  const manual = (settings.extensions || []).filter((d) => !lingtu || manifestOf(d)?.name !== LINGTU_NAME)
+  Promise.allSettled([...(lingtu ? [lingtu.dir] : []), ...manual].map(loadExtension)).finally(() => {
     createLauncher()
     lockWin?.close()
     scheduleUpdateChecks()
+    if (settings.lingtu !== false) setTimeout(() => updateLingtu(lingtu), 15000)
   })
 }
 
@@ -531,97 +536,34 @@ function wireSiteWindow(win) {
   win.webContents.on('destroyed', () => {
     tokens.delete(siteId)
     menuCommands.delete(siteId)
-    panels.delete(siteId)
   })
-  attachPanel(win)
+  setupAutoAct(win)
 }
 
-// The collector panel is a native view docked on the right of each site window; the page no longer shows it.
-const PANEL_WIDTH = 360
-const PANEL_COLLAPSED_HEIGHT = 46
-const panels = new Map()
-const panelOwners = new Map()
-
-function attachPanel(win) {
-  const view = new WebContentsView({
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(__dirname, 'preload-panel.js') },
-  })
-  view.setBackgroundColor('#161616')
-  view.setVisible(false)
-  win.contentView.addChildView(view)
-  view.webContents.loadFile(path.join(__dirname, 'panel.html'))
+// The collector panel renders inside the page exactly like the Tampermonkey script; launcher shortcuts drive it via IPC.
+// Auto-start waits for redirects (e.g. temu.com -> temu.com/ca) to settle; any main-frame navigation restarts the countdown.
+function setupAutoAct(win) {
   const site = win.webContents
-  const state = { view, win, collapsed: false, ready: false, lastSnap: '', autoAct: autoActFor.get(win.id) || '', autoTimer: null }
+  let autoAct = autoActFor.get(win.id) || ''
   autoActFor.delete(win.id)
-  panels.set(site.id, state)
-  panelOwners.set(view.webContents.id, site)
-
-  const layout = () => {
-    if (win.isDestroyed()) return
-    const [w, h] = win.getContentSize()
-    const width = Math.min(PANEL_WIDTH, w)
-    view.setBounds({ x: w - width, y: 0, width, height: state.collapsed ? Math.min(PANEL_COLLAPSED_HEIGHT, h) : h })
-  }
-  state.layout = layout
-  layout()
-  win.on('resize', layout)
-  // Snapshots pushed before the panel page finished loading would otherwise be lost and leave it stuck on "loading".
-  view.webContents.once('did-finish-load', () => {
-    state.ready = true
-    if (state.lastSnap) view.webContents.send('panel:snapshot', state.lastSnap)
-  })
+  if (!autoAct) return
+  let timer = null
   site.on('did-start-navigation', (details) => {
     const isMain = details && typeof details === 'object' ? details.isMainFrame && !details.isSameDocument : true
-    if (!isMain) return
-    state.lastSnap = ''
-    clearTimeout(state.autoTimer)
-    view.setVisible(false)
-    if (state.ready) view.webContents.send('panel:reset')
+    if (isMain) clearTimeout(timer)
   })
-  win.on('closed', () => {
-    clearTimeout(state.autoTimer)
-    panelOwners.delete(view.webContents.id)
-    if (!view.webContents.isDestroyed()) view.webContents.close()
-  })
-}
-
-ipcMain.on('gm:panel-push', (e, token, snap) => {
-  if (!checkToken(e, token) || typeof snap !== 'string') return
-  const state = panels.get(e.sender.id)
-  if (!state || state.win.isDestroyed()) return
-  const first = !state.lastSnap
-  state.lastSnap = snap
-  if (state.ready) state.view.webContents.send('panel:snapshot', snap)
-  if (!state.view.getVisible()) {
-    state.view.setVisible(true)
-    state.layout()
-  }
-  // Wait for redirects (e.g. temu.com -> temu.com/ca) to settle before auto-starting; a navigation cancels the timer.
-  if (first && state.autoAct) {
-    const site = e.sender
-    clearTimeout(state.autoTimer)
-    state.autoTimer = setTimeout(() => {
-      if (site.isDestroyed() || !tokens.has(site.id) || !state.autoAct) return
-      const k = state.autoAct
-      state.autoAct = ''
+  site.on('did-stop-loading', () => {
+    if (!autoAct) return
+    clearTimeout(timer)
+    timer = setTimeout(() => {
+      if (site.isDestroyed() || !tokens.has(site.id) || !autoAct) return
+      const k = autoAct
+      autoAct = ''
       site.send('gm:panel-act', { t: 'key', k })
     }, 3500)
-  }
-})
-
-ipcMain.on('panel:act', (e, msg) => {
-  const site = panelOwners.get(e.sender.id)
-  if (!unlocked || !site || site.isDestroyed() || !tokens.has(site.id) || !msg || typeof msg !== 'object') return
-  site.send('gm:panel-act', msg)
-})
-
-ipcMain.on('panel:collapse', (e, on) => {
-  const site = panelOwners.get(e.sender.id)
-  const state = site && panels.get(site.id)
-  if (!state) return
-  state.collapsed = !!on
-  state.layout()
-})
+  })
+  win.on('closed', () => clearTimeout(timer))
+}
 
 const autoActFor = new Map()
 const AUTO_ACTIONS = new Set(['here', 'start'])
@@ -644,6 +586,35 @@ function openSite(url, autoAct) {
   win.loadURL(url)
 }
 
+function bundledLingtuDir() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'extensions', 'lingtu') : path.join(__dirname, '..', 'extensions', 'lingtu')
+}
+function lingtuBaseDir() {
+  return path.join(app.getPath('userData'), 'extensions')
+}
+
+// Installs a newer 灵图 from the Chrome Web Store; if none was loaded yet it takes effect at once, otherwise after restart.
+async function updateLingtu(current) {
+  try {
+    fs.mkdirSync(lingtuBaseDir(), { recursive: true })
+    const r = await downloadLingtu(lingtuBaseDir(), (u, o) => net.fetch(u, o), current && current.version)
+    if (!r.dir) return
+    if (!current) {
+      await loadExtension(r.dir)
+      reloadSitePages()
+      notifyApp('灵图插件已安装', '灵图卖家辅助工具 v' + r.version + ' 已集成到网页窗口，悬浮球在页面左侧')
+    } else {
+      notifyApp('灵图插件有新版本', '已下载 v' + r.version + '，重启 MT采集器 后生效')
+    }
+  } catch (e) {
+    console.warn('[lingtu] update failed:', e && e.message ? e.message : e)
+  }
+}
+
+function notifyApp(title, body) {
+  if (Notification.isSupported()) new Notification({ title, body }).show()
+}
+
 async function loadExtension(dir) {
   const ses = session.fromPartition(PARTITION)
   for (const ext of ses.extensions?.getAllExtensions?.() ?? ses.getAllExtensions()) {
@@ -656,7 +627,7 @@ async function loadExtension(dir) {
 async function pickExtension() {
   const win = BrowserWindow.getFocusedWindow()
   const res = await dialog.showOpenDialog(win, {
-    title: '选择灵图插件的解压目录（包含 manifest.json）',
+    title: '选择插件的解压目录（包含 manifest.json）',
     properties: ['openDirectory'],
   })
   if (res.canceled || !res.filePaths[0]) return
@@ -697,7 +668,7 @@ function buildMenu() {
           ? scriptItems.map((name) => ({ label: name, click: () => send(name) }))
           : [{ label: '（打开电商网页后可用）', enabled: false }],
       },
-      { label: '插件', submenu: [{ label: '加载灵图插件（解压目录）…', click: pickExtension }] },
+      { label: '插件', submenu: [{ label: '灵图卖家辅助工具：已内置并自动更新', enabled: false }, { type: 'separator' }, { label: '加载其他插件（解压目录）…', click: pickExtension }] },
       {
         label: '窗口',
         submenu: [

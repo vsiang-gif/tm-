@@ -277,7 +277,7 @@ const CUSTOM = {
     const info = el('p', { class: 'hint' }, '读取中…')
     const refresh = async () => {
       const wins = (await window.desktop.windows()) || []
-      info.textContent = wins.length ? '已打开 ' + wins.length + ' 个网页窗口，点一下切换过去：' : '还没有打开网页窗口，先在「站点」里点「打开」。'
+      info.textContent = wins.length ? '已打开 ' + wins.length + ' 个网页窗口，点一下切换过去：' : '还没有打开网页窗口，先在上面「打开网址」或点「开始多站点采集」。'
       list.replaceChildren(
         ...wins.map((w) => {
           const b = el('button', { type: 'button', title: w.title }, '#' + w.no + ' ' + String(w.title).slice(0, 24))
@@ -368,13 +368,13 @@ const CUSTOM = {
   },
 
   ext() {
-    const b = el('button', { type: 'button', class: 'ghost' }, '加载灵图插件（解压目录）')
+    const b = el('button', { type: 'button', class: 'ghost' }, '加载其他插件（解压目录）')
     b.addEventListener('click', () => window.desktop.loadExtension())
     return el(
       'div',
       { class: 'field' },
+      el('p', { class: 'hint' }, '灵图卖家辅助工具已内置：每个网页窗口自动加载（悬浮球在页面左侧），启动后会自动检查并下载新版本，重启生效。首次使用请在网页里点悬浮球登录灵图账号。'),
       b,
-      el('p', { class: 'hint' }, '把灵图插件解压到一个文件夹，点上面按钮选择该文件夹，之后每次启动都会自动加载。'),
     )
   },
 
@@ -478,19 +478,16 @@ const CUSTOM = {
       const list = ALL_SITES.filter((s) => s.p === p.id)
       const on = list.filter((s) => siteEntry(s).on).length
       const det = el('details', { open: on ? '' : null }, el('summary', {}, p.name + (on ? '（已选 ' + on + '）' : '')))
+      const grid = el('div', { class: 'sitegrid' })
       for (const s of list) {
         const e = siteEntry(s)
         const id = 'site-' + s.id
         const box = el('input', { id, type: 'checkbox' })
         box.checked = !!e.on
         box.addEventListener('change', () => patchSite(s.id, { on: box.checked }))
-        const kw = el('input', { type: 'text', 'aria-label': s.name + ' 专用关键词', placeholder: '留空 = 用上面共用关键词', spellcheck: 'false' })
-        kw.value = e.kws || ''
-        kw.addEventListener('change', () => patchSite(s.id, { kws: kw.value.trim() }))
-        const open = el('button', { type: 'button', class: 'ghost small', title: s.url, 'aria-label': '打开 ' + p.name + ' ' + s.name }, '打开')
-        open.addEventListener('click', () => window.desktop.open(s.url))
-        det.append(el('div', { class: 'site' }, el('label', { class: 'check', for: id }, box, s.name), kw, open))
+        grid.append(el('label', { class: 'check', for: id }, box, s.name))
       }
+      det.append(grid)
       wrap.append(det)
     }
     return wrap
