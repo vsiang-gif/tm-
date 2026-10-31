@@ -1,7 +1,7 @@
 {
   "name": "tm-collector",
   "productName": "MT采集器",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "private": true,
   "description": "MT采集器 Windows 桌面版（需密钥）",
   "main": "src/main.js",

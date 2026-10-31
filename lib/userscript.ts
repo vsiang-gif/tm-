@@ -1663,7 +1663,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.38.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.38.1';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -1678,7 +1678,8 @@ const COLLECTOR_BODY = String.raw`
     if (t.type === 'here') return location.pathname === t.path;
     if (siteBy(t.site).p !== PKEY) return false;
     // A store's own search results (e.g. Temu search_result with mall_id) are never the site-wide search.
-    if (t.type === 'search') return currentSite().id === t.site && isMainSearch() && (!!t.navigated || hrefHas(t.keyword));
+    // Temu may keep the account's remembered country after we navigate; the region check right after handles that.
+    if (t.type === 'search') return (currentSite().id === t.site || (PKEY === 'temu' && !!t.navigated)) && isMainSearch() && (!!t.navigated || hrefHas(t.keyword));
     if (t.type === 'goods') return PLAT.goods(location.href) === t.goodsId;
     // Some stores (e.g. Shopee /shop/123) redirect to a vanity URL, so accept any non-search, non-product page after navigating.
     if (t.type === 'store') return PLAT.store(location.href) === t.storeId || (!!t.navigated && !PLAT.isSearch() && !PLAT.goods(location.href));
@@ -1896,11 +1897,16 @@ const COLLECTOR_BODY = String.raw`
       }
       // Temu keyword searches start from the site's home page search box, never from inside a store.
       var viaHome = PKEY === 'temu' && t.type === 'search' && !t.returnUrl && siteBy(t.site).p === PKEY;
-      if (viaHome && !onTaskPage(t) && !t.homeTyped && isHomePage() && currentSite().id === t.site) {
+      // Temu redirects to the remembered country's home (e.g. US -> /ca); after one redirect, search from whatever home we land on.
+      if (viaHome && !onTaskPage(t) && !t.homeTyped && isHomePage() && (currentSite().id === t.site || (t.tries || 0) > 0)) {
         t.homeTyped = true; t.navigated = true; setJob(job);
         log('在 Temu 首页搜索框输入「' + t.keyword + '」并搜索');
-        await sleep(1500 + Math.random() * 1000);
-        if (!(await typeSearch(t.keyword))) location.href = searchUrl(t.site, t.keyword);
+        await sleep(2500 + Math.random() * 1000);
+        if (!(await typeSearch(t.keyword))) { location.href = searchUrl(t.site, t.keyword); return; }
+        // Temu's search is an in-page route change, so this script is not reloaded: keep going on the results page.
+        if (await waitFor(isMainSearch, 8000)) { await sleep(2000); continue; }
+        log('搜索框提交后没进入搜索结果页，直接打开搜索网址「' + t.keyword + '」');
+        location.href = searchUrl(t.site, t.keyword);
         return;
       }
       if (!onTaskPage(t)) {
@@ -2831,6 +2837,8 @@ const COLLECTOR_BODY = String.raw`
   $('here').onclick = function () {
     if (getJob()) { log('已有任务，请先「结束任务」'); return; }
     if (!preflight()) return;
+    // The home page is only recommendations, not search results: run the keyword search instead.
+    if (isHomePage()) { log('当前是首页推荐，不是搜索结果，改为按关键词搜索后再采集'); $('start').onclick(); return; }
     startJob([{ type: 'here', site: currentSite().id, path: location.pathname }]);
   };
   $('store').onclick = function () {
@@ -2961,7 +2969,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.38.0',
+    '// @version      6.38.1',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
