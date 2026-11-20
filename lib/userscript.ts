@@ -1127,7 +1127,7 @@ const COLLECTOR_BODY = String.raw`
     if (cfg.printMulti) w.push('多印花');
     return '只要' + (w.join(' / ') || '不限');
   }
-  var DOUBLE_RE = /双面|两面|正反面|前后印花|背面印花|前后都有|double.?sided|two.?sided|2.?sided|front (?:and|&|\+) back|back print|both sides/gi;
+  var DOUBLE_RE = /双面|两面|[2二两]\s*面|正反|前后|背面印花|背印|后背印|double.?sided|two.?sided|dual.?sided|[2two]+.?sides?\b|front\s*(?:and|&|\+|\/|-)?\s*back|back\s*(?:and|&|\+|\/|-)?\s*front|back.?print(?:ed|ing)?|print(?:ed)?\s+on\s+(?:the\s+)?back|both.?sides?|reversible|double.?print(?:ed)?/gi;
   function shirtColorBad(r, ctx) {
     var sc = String(r.shirtColor || '');
     if (!sc) return !!(r.notColor || r.notBlack);
@@ -1140,7 +1140,7 @@ const COLLECTOR_BODY = String.raw`
     var c = cat();
     var aiTitle = String(item.title || '').replace(DOUBLE_RE, ' ').replace(/\by2k\b/gi, 'Y2K复古风').replace(/\s{2,}/g, ' ').trim();
     var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件' + c.ai + '的印花图案。商品标题：' + aiTitle +
-      '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件衣服本身，裤子和配饰的颜色、图案一律忽略。' +
+      '\n标题只用来判断违规/IP/品类；印花面数（单面还是双面）只能看图片，标题里写的双面、两面、正反面、前后印花、front and back 等字样一律无效，图里没拍到第二面就是单面。' + '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件衣服本身，裤子和配饰的颜色、图案一律忽略。' +
       '\nY2K 只是千禧年复古风格的名字，和双面无关；图案里印的 Y2K、数字 2、2 SIDED 之类文字也不代表双面，一律按图里实际拍到几面来判断。' +
       '\n双面判断只看图片，完全不要看标题。这件衣服有 4 个可以印花的面：正面、背面、左袖（含袖口）、右袖（含袖口）。请逐个判断每个面在图里是否「实际看得到印花」：看不到的面（没拍到）一律算 false，不要根据标题或常识推断。' +
       '\n只要有 2 个或以上的面有印花就算双面，合格组合是：正面 + 背面、正面 + 袖口、背面 + 袖口、左袖 + 右袖。只拍到一面有印花（例如只拍背面大印花、衣架挂拍只看到一面、平铺只看到一面）就不是双面。常见的真双面排版是「大图拍背面大印花 + 角落小圆圈/小方框拍同一件衣服的正面胸口小 logo」，或「两个模特一正一背穿同一款」，这是同一件衣服的两个面，multiple=false，不要当成多件衣服；只有不同款式/不同颜色的多件衣服才算 multiple。' +
@@ -1167,6 +1167,9 @@ const COLLECTOR_BODY = String.raw`
     if (!r.plain && faces < 1) faces = 1;
     faces = Math.max(0, Math.min(4, Math.round(faces)));
     r.sleevePrint = !!(r.leftSleevePrint || r.rightSleevePrint || r.sleevePrint);
+    // Double-sided must be backed by what the model saw in the image, never by the title.
+    var ev = String(r.faceEvidence || '');
+    if (faces >= 2 && (!ev.trim() || /标题|title|写着|写了|描述|文字说明|推断|可能|应该/i.test(ev))) faces = 1;
     var dbl = cfg.aiVision && faces >= 2;
     if (!cfg.aiVision) faces = Math.min(faces, 1);
     if (dbl && faces < 2) faces = 2;
@@ -1706,7 +1709,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.43.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.44.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -3012,7 +3015,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.43.0',
+    '// @version      6.44.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
