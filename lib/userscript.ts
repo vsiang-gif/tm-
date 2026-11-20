@@ -1139,13 +1139,15 @@ const COLLECTOR_BODY = String.raw`
   }
   async function aiCheck(item) {
     var c = cat();
-    var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件' + c.ai + '的印花图案。商品标题：' + item.title +
+    var aiTitle = String(item.title || '').replace(/\by2k\b/gi, 'Y2K复古风');
+    var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件' + c.ai + '的印花图案。商品标题：' + aiTitle +
       '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件衣服本身，裤子和配饰的颜色、图案一律忽略。' +
+      '\nY2K 只是千禧年复古风格的名字，和双面无关；图案里印的 Y2K、数字 2、2 SIDED 之类文字也不代表双面，一律按图里实际拍到几面来判断。' +
       '\n双面判断只看图片，完全不要看标题：必须在图里同时看到同一件衣服的正面和背面、并且两面都有印花，才算 doubleSided=true。只拍到一面（例如只拍背面大印花、衣架挂拍只看到一面、平铺只看到一面）就是 doubleSided=false、printFaces=1，哪怕标题写了双面/front and back/back print 也一样。常见的真双面排版是「大图拍背面的大印花 + 角落小圆圈/小方框拍同一件衣服的正面（胸口小 logo）」，或「两个模特一正一背穿同一款」。这都是同一件衣服的前后双面印花：doubleSided=true、printFaces 至少 2、multiple=false，不要当成多件衣服。只有出现不同款式/不同颜色的多件衣服才算 multiple。' +
       '\n颜色判断：先看衣领、肩膀、两只袖子、下摆这些没有印花的布料，再决定颜色；' +
       '只看这件衣服大面积布料的颜色（肩膀、袖子、下摆、没有印花的地方），忽略背景、墙面、皮肤、纹身、裤子、印花图案本身的颜色，也忽略角落小图；大面积白色印花的黑衣服仍是黑色，大面积彩色印花的白衣服仍是白色。' +
       '\n品类区分：' + CATS.washed.look + '；' + CATS.cotton.look + '。' + (c.tee ? '' : '本次要的品类是 ' + c.look + '。') +
-      '\n只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满（含满身波点、豹纹、星星等小碎花纹）,"multiple":主图里是否出现 2 件或以上衣服（多件装、叠放、多个模特穿不同衣服）,"sleevePrint":袖子或袖口上是否有印花/图案/字母,"printFaces":这件衣服一共有几个面有印花（正面、背面、左袖、右袖各算 1 个，胸口小 logo 也算正面有印花，0-4 的整数；只数图片里实际看得到印花的面，不要根据标题推断，只拍到一面就填 1）,"plain":是否纯色素面没有任何印花图案,"shirtColor":衣服布料主体颜色，只能填 "黑色"、"白色"、"灰色"、"其他" 之一（米白/奶白算白色，深炭灰算灰色）,"washed":是否是水洗/做旧/酸洗面料（炭灰褪色、斑驳雪花纹理）,"wrongType":这件衣服是否不是' + c.ai + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
+      '\n只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"doubleEvidence":如果 doubleSided=true，用一句话说明图里哪里是正面、哪里是背面（例如「大图是背面印花，右下角圆圈小图是正面胸口小 logo」），否则填空字符串,"fullPrint":是否满身印花或图案特别满（含满身波点、豹纹、星星等小碎花纹）,"multiple":主图里是否出现 2 件或以上衣服（多件装、叠放、多个模特穿不同衣服）,"sleevePrint":袖子或袖口上是否有印花/图案/字母,"printFaces":这件衣服一共有几个面有印花（正面、背面、左袖、右袖各算 1 个，胸口小 logo 也算正面有印花，0-4 的整数；只数图片里实际看得到印花的面，不要根据标题推断，只拍到一面就填 1）,"plain":是否纯色素面没有任何印花图案,"shirtColor":衣服布料主体颜色，只能填 "黑色"、"白色"、"灰色"、"其他" 之一（米白/奶白算白色，深炭灰算灰色）,"washed":是否是水洗/做旧/酸洗面料（炭灰褪色、斑驳雪花纹理）,"wrongType":这件衣服是否不是' + c.ai + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
     var content = cfg.aiVision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: item.imageUrl } }]
       : prompt;
@@ -1158,7 +1160,11 @@ const COLLECTOR_BODY = String.raw`
     if (!isFinite(faces)) faces = (r.plain ? 0 : 1) + (r.doubleSided ? 1 : 0) + (c.tee && r.sleevePrint ? 1 : 0);
     faces = Math.max(0, Math.min(4, Math.round(faces)));
     // With vision on, double-sided is judged from the picture only; titles often claim it falsely.
-    var dbl = cfg.aiVision ? !!r.doubleSided : (!!r.doubleSided || DOUBLE_RE.test(item.title || ''));
+    var evidence = String(r.doubleEvidence || '').trim();
+    // A "double" verdict without a described front+back view is usually the model reading the title (e.g. Y2K).
+    var seenTwice = !!r.doubleSided && evidence.length >= 4 && !/^(无|没有|none|n\/a|y2k)/i.test(evidence);
+    if (r.doubleSided && !seenTwice) { r.doubleSided = false; if (faces >= 2 && !(c.tee && r.sleevePrint)) faces = 1; }
+    var dbl = cfg.aiVision ? seenTwice : (!!r.doubleSided || DOUBLE_RE.test(item.title || ''));
     if (dbl && faces < 2) faces = 2;
     var multi = r.multiple && !dbl;
     var colorBad = shirtColorBad(r, item.ctx);
@@ -1696,7 +1702,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.40.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.41.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -3002,7 +3008,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.40.0',
+    '// @version      6.41.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
