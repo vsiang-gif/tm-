@@ -1141,10 +1141,11 @@ const COLLECTOR_BODY = String.raw`
     var c = cat();
     var prompt = '你是跨境电商服装上架审核员，要判断能否采集这件' + c.ai + '的印花图案。商品标题：' + item.title +
       '\n请根据标题' + (cfg.aiVision ? '和图片' : '') + '判断。注意：图片可能是模特穿搭图，带裤子、包、帽子、鞋等配饰，只看上身那件衣服本身，裤子和配饰的颜色、图案一律忽略。' +
-      '\n双面判断：这类主图常见排版是「大图拍背面的大印花 + 角落小圆圈/小方框拍同一件衣服的正面（胸口小 logo）」，或「两个模特一正一背穿同一款」。这都是同一件衣服的前后双面印花：doubleSided=true、printFaces 至少 2、multiple=false，不要当成多件衣服。只有出现不同款式/不同颜色的多件衣服才算 multiple。' +
-      '\n颜色判断：只看这件衣服大面积布料的颜色（肩膀、袖子、下摆、没有印花的地方），忽略背景、墙面、皮肤、纹身、裤子、印花图案本身的颜色，也忽略角落小图；大面积白色印花的黑衣服仍是黑色，大面积彩色印花的白衣服仍是白色。' +
+      '\n双面判断只看图片，完全不要看标题：必须在图里同时看到同一件衣服的正面和背面、并且两面都有印花，才算 doubleSided=true。只拍到一面（例如只拍背面大印花、衣架挂拍只看到一面、平铺只看到一面）就是 doubleSided=false、printFaces=1，哪怕标题写了双面/front and back/back print 也一样。常见的真双面排版是「大图拍背面的大印花 + 角落小圆圈/小方框拍同一件衣服的正面（胸口小 logo）」，或「两个模特一正一背穿同一款」。这都是同一件衣服的前后双面印花：doubleSided=true、printFaces 至少 2、multiple=false，不要当成多件衣服。只有出现不同款式/不同颜色的多件衣服才算 multiple。' +
+      '\n颜色判断：先看衣领、肩膀、两只袖子、下摆这些没有印花的布料，再决定颜色；' +
+      '只看这件衣服大面积布料的颜色（肩膀、袖子、下摆、没有印花的地方），忽略背景、墙面、皮肤、纹身、裤子、印花图案本身的颜色，也忽略角落小图；大面积白色印花的黑衣服仍是黑色，大面积彩色印花的白衣服仍是白色。' +
       '\n品类区分：' + CATS.washed.look + '；' + CATS.cotton.look + '。' + (c.tee ? '' : '本次要的品类是 ' + c.look + '。') +
-      '\n只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满（含满身波点、豹纹、星星等小碎花纹）,"multiple":主图里是否出现 2 件或以上衣服（多件装、叠放、多个模特穿不同衣服）,"sleevePrint":袖子或袖口上是否有印花/图案/字母,"printFaces":这件衣服一共有几个面有印花（正面、背面、左袖、右袖各算 1 个，胸口小 logo 也算正面有印花，0-4 的整数；图里只拍到一面时按看到的和标题描述推断）,"plain":是否纯色素面没有任何印花图案,"shirtColor":衣服布料主体颜色，只能填 "黑色"、"白色"、"灰色"、"其他" 之一（米白/奶白算白色，深炭灰算灰色）,"washed":是否是水洗/做旧/酸洗面料（炭灰褪色、斑驳雪花纹理）,"wrongType":这件衣服是否不是' + c.ai + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
+      '\n只返回 JSON：{"violation":是否涉及毒品/大麻/色情/暴力/仇恨等违规内容,"ipRisk":是否是迪士尼/三丽鸥/动漫/游戏/影视等知名 IP 或品牌,"doubleSided":是否前后双面印花,"fullPrint":是否满身印花或图案特别满（含满身波点、豹纹、星星等小碎花纹）,"multiple":主图里是否出现 2 件或以上衣服（多件装、叠放、多个模特穿不同衣服）,"sleevePrint":袖子或袖口上是否有印花/图案/字母,"printFaces":这件衣服一共有几个面有印花（正面、背面、左袖、右袖各算 1 个，胸口小 logo 也算正面有印花，0-4 的整数；只数图片里实际看得到印花的面，不要根据标题推断，只拍到一面就填 1）,"plain":是否纯色素面没有任何印花图案,"shirtColor":衣服布料主体颜色，只能填 "黑色"、"白色"、"灰色"、"其他" 之一（米白/奶白算白色，深炭灰算灰色）,"washed":是否是水洗/做旧/酸洗面料（炭灰褪色、斑驳雪花纹理）,"wrongType":这件衣服是否不是' + c.ai + ',"reason":"一句话中文原因"}，布尔值用 true/false。';
     var content = cfg.aiVision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: item.imageUrl } }]
       : prompt;
@@ -1156,7 +1157,8 @@ const COLLECTOR_BODY = String.raw`
     var faces = Number(r.printFaces);
     if (!isFinite(faces)) faces = (r.plain ? 0 : 1) + (r.doubleSided ? 1 : 0) + (c.tee && r.sleevePrint ? 1 : 0);
     faces = Math.max(0, Math.min(4, Math.round(faces)));
-    var dbl = !!r.doubleSided || DOUBLE_RE.test(item.title || '');
+    // With vision on, double-sided is judged from the picture only; titles often claim it falsely.
+    var dbl = cfg.aiVision ? !!r.doubleSided : (!!r.doubleSided || DOUBLE_RE.test(item.title || ''));
     if (dbl && faces < 2) faces = 2;
     var multi = r.multiple && !dbl;
     var colorBad = shirtColorBad(r, item.ctx);
@@ -1311,6 +1313,13 @@ const COLLECTOR_BODY = String.raw`
   var PRINT_RE = /graphic|print|pattern|design|logo|letter|slogan|druck|motif|imprim|estampad|stampa|印花|图案|圖案|字母|文字|プリント|프린트/i;
   // 2/3/6-packs of basic tees ("3 件装", "6-Pack", "Pack of 4", "Multipack") are almost always plain colors.
   var MULTI_RE = /([2-9]|1\d)\s*(件装|件套|件入|枚組|枚セット|入り|장|-?\s*(pack|pk|pcs|pieces|piece|stück|stuck|pièces|pezzi|piezas|unidades|teile))(?![a-z])|(pack|set|lot)\s*(of|de|di|von)\s*([2-9]|1\d)(?!\d)|multi\s*-?\s*pack|value\s*pack|variety\s*pack|assorted|combo\s*pack|(\d+)\s*er[\s-]*(pack|set)|[两二三四五六七八九十]\s*件(装|套|入)?|[2-9]\s*件|多件|组合装|[2-9]\s*(色|colou?rs?)\s*(装|pack|set)/i;
+  // Second opinion on the AI color: the measured shirt body (print excluded) must not clearly be the opposite color.
+  function fabricColorBad(info, ctx) {
+    if (!cfg.blackOnly || !info || !info.shirt || cfg.category === 'washed') return null;
+    var dark = info.dark || 0, light = info.light || 0;
+    if (colorOf(ctx) === 'white') return dark >= 0.3 && dark > light * 1.5 ? '不是白色（布料像素检测为深色：深色 ' + Math.round(dark * 100) + '%，白色 ' + Math.round(light * 100) + '%）' : null;
+    return light >= 0.3 && light > dark * 1.5 ? '不是黑色（布料像素检测为浅色：白色 ' + Math.round(light * 100) + '%，深色 ' + Math.round(dark * 100) + '%）' : null;
+  }
   function isPlainTitle(t) { t = String(t || ''); return (PLAIN_RE.test(t) || MULTI_RE.test(t)) && !PRINT_RE.test(t); }
   async function processItem(item) {
     var ctx = item.ctx;
@@ -1318,7 +1327,7 @@ const COLLECTOR_BODY = String.raw`
     if (cfg.noPlain && MULTI_RE.test(String(item.title || ''))) { markSkipped(item, '多件装主图（标题）'); return false; }
     if (cfg.noPlain && isPlainTitle(item.title)) { markSkipped(item, '纯色无图案（标题）'); return false; }
     var info = null;
-    if (cfg.imgDedupe || cfg.noPlain || (cfg.blackOnly && cfg.pixelCheck)) {
+    if (cfg.imgDedupe || cfg.noPlain || cfg.blackOnly) {
       try { info = await imageInfo(item.imageUrl); } catch (e) { log('图片检测失败，继续：' + e.message, true); }
     }
     var twin = info && cfg.imgDedupe ? similarSynced(info.hash) : null;
@@ -1349,6 +1358,8 @@ const COLLECTOR_BODY = String.raw`
       var bad = await aiCheck(item);
       if (bad) { markSkipped(item, '豆包：' + bad); return false; }
     }
+    var fabricBad = fabricColorBad(info, ctx);
+    if (fabricBad) { markSkipped(item, fabricBad); return false; }
     if (capReached()) { queue.length = 0; return false; }
 
     var clean = cleanTitle(item.title), files = [];
@@ -1437,14 +1448,15 @@ const COLLECTOR_BODY = String.raw`
         return;
       }
       var hit = findHit(x.title, skipList);
-      if (hit && facesMultiOk() && DOUBLE_RE.test(hit)) hit = null;
+      if (hit && (facesMultiOk() || (cfg.useAi && cfg.aiCheck && cfg.aiVision)) && DOUBLE_RE.test(hit)) hit = null;
       if (hit) { stats.skipped++; log('跳过 ' + x.goodsId + '：标题含「' + hit + '」'); markCard(x.el, 'bad', '不采：标题含「' + hit + '」'); return; }
       var st = ctx.task;
       if (st && st.type === 'store' && st.keyword && !titleMatchesKeyword(x.title, st.keyword)) {
         stats.skipped++; markCard(x.el, 'warn', '不采：与「' + st.keyword.slice(0, 20) + '」无关'); return;
       }
       if (cfg.category === 'cotton' && WASH_RE.test(x.title)) { stats.skipped++; markCard(x.el, 'warn', '不采：标题是水洗T，当前品类是纯棉T'); return; }
-      var cre = colorOf(ctx) === 'white' ? WHITE_RE : BLACK_RE;
+      var cre = colorOf(ctx) === 'white' ? WHITE_RE : BLACK_RE, other = colorOf(ctx) === 'white' ? BLACK_RE : WHITE_RE;
+      if (cfg.blackOnly && cfg.category !== 'washed' && other.test(x.title) && !cre.test(x.title)) { stats.skipped++; markCard(x.el, 'warn', '不采：标题写的是' + (colorOf(ctx) === 'white' ? '黑色' : '白色')); return; }
       if (cfg.blackOnly && !cfg.pixelCheck && !cre.test(x.title)) return;
       x.ctx = ctx;
       x.black = cre.test(x.title);
@@ -1684,7 +1696,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.39.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.40.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -2990,7 +3002,7 @@ export function buildUserscript() {
     '// ==UserScript==',
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
-    '// @version      6.39.0',
+    '// @version      6.40.0',
     '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
