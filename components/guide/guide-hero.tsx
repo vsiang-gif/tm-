@@ -13,7 +13,7 @@ export function GuideHero() {
           Temu → 灵图 · 在你自己的电脑上运行
         </p>
         <h1 className="text-balance text-4xl font-semibold leading-tight md:text-5xl">
-          服饰爆款图案，豆包审核后一键进灵图
+          服饰爆款图案，Gemini审核后一键进灵图
         </h1>
         <p className="text-pretty leading-relaxed text-muted-foreground">
           装好浏览器插件后，Temu 页面右侧会固定显示一个采集面板。它会按你勾选的国家逐个搜索，只留下有销量的黑色单面款，还会进店铺继续采。

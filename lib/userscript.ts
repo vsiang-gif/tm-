@@ -136,7 +136,7 @@ const COLLECTOR_BODY = String.raw`
   var PNAMES = __PNAMES__;
   var DEFAULT_SKIP = __SKIP__;
   var DEFAULT_REMOVE = __REMOVE__;
-  var ARK_URL = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+  var GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 
   // ---------- per-platform adapters ----------
   function stripSuffix(u) { return u.split('?')[0].replace(/(\.(?:jpe?g|png|webp))_.*$/i, '$1'); }
@@ -268,7 +268,7 @@ const COLLECTOR_BODY = String.raw`
   var MALE_WORDS = ['男装', '男士', '男款', '男式', '男性', '男生', '男', "men's", 'mens', 'men', 'man', 'male', 'herren', 'homme', 'hombre', 'uomo', 'masculina', 'pria', 'メンズ'];
 
   var DEFAULTS = {
-    useAi: true, arkKey: '', arkModel: 'doubao-seed-2-0-pro',
+    useAi: true, gemKey: '', gemModel: 'gemini-4-hydrogen',
     minSales: 20, target: 60, maxPages: 5, blackOnly: true, pixelCheck: true, darkMin: 40, gender: 'men',
     enterStore: false, storeCount: 3, storeTarget: 30,
     handoff: 'alt1', clickGap: 3, saveOriginal: false, aiCheck: true, aiVision: true,
@@ -282,7 +282,7 @@ const COLLECTOR_BODY = String.raw`
     noPlain: true, printMin: 3, printOne: true, printTwo: false, printMulti: false, kwScope: 'temu-us', category: 'cotton', grayMin: 40, catKws: {}
   };
   var cfg = Object.assign({}, DEFAULTS, GM_getValue('cfg', {}));
-  if (!cfg.arkModel || /^doubao-seed-1-6/.test(cfg.arkModel) || /seedance|seedream/i.test(cfg.arkModel)) cfg.arkModel = DEFAULTS.arkModel;
+  if (!cfg.gemModel || !/^gemini-/i.test(cfg.gemModel) || /image|tts|live|omni|embedding|banana/i.test(cfg.gemModel)) cfg.gemModel = DEFAULTS.gemModel;
   if ([6, 7, 8, 9].indexOf(cfg.v) < 0) { cfg.v = 6; cfg.aiCheck = true; cfg.saveOriginal = false; cfg.handoff = 'alt1'; }
   if (cfg.v === 6) { cfg.v = 7; if (cfg.minSales === 100) cfg.minSales = DEFAULTS.minSales; }
   if (cfg.v === 7) { cfg.v = 8; cfg.enterStore = false; }
@@ -864,26 +864,43 @@ const COLLECTOR_BODY = String.raw`
     return run;
   }
 
-  async function doubao(content) {
-    if (!cfg.useAi) throw new Error('豆包功能已关闭，要用请在「豆包/同步」里勾选「启用豆包」');
-    if (!cfg.arkKey) throw new Error('请先在「豆包/同步」里填写豆包 API Key');
-    if (/seedance|seedream/i.test(cfg.arkModel || '')) {
-      cfg.arkModel = DEFAULTS.arkModel;
-      GM_setValue('cfg', cfg);
-      log('Seedance/Seedream 是视频/画图模型，不能做审核和翻译，已自动改回 ' + DEFAULTS.arkModel);
-    }
-    var r = await gmRequest({
-      method: 'POST', url: ARK_URL,
-      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + cfg.arkKey },
-      data: JSON.stringify({ model: cfg.arkModel, temperature: 0.1, messages: [{ role: 'user', content: content }] })
+  // Gemini's OpenAI-compatible endpoint only accepts inline (base64) images, so product image URLs are fetched first.
+  async function toDataUrl(url) {
+    var r = await gmRequest({ method: 'GET', url: url, responseType: 'blob' });
+    if (r.status >= 400) throw new Error('图片 HTTP ' + r.status);
+    return await new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(fr.result); };
+      fr.onerror = function () { reject(new Error('图片读取失败')); };
+      fr.readAsDataURL(r.response);
     });
-    var json = null;
-    try { json = JSON.parse(r.responseText); } catch (e) {}
-    if (r.status >= 400 || !json || !json.choices) throw new Error('豆包接口出错：' + ((json && json.error && json.error.message) || ('HTTP ' + r.status)));
-    var text = json.choices[0].message.content || '';
-    var m = text.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('豆包没有返回 JSON');
-    return JSON.parse(m[0]);
+  }
+  async function askAi(content) {
+    if (!cfg.useAi) throw new Error('Gemini 功能已关闭，要用请在「AI/去重」里勾选「启用 Gemini」');
+    if (!cfg.gemKey) throw new Error('请先在「AI/去重」里填写 Gemini API Key');
+    if (Array.isArray(content)) {
+      content = await Promise.all(content.map(async function (part) {
+        if (part.type !== 'image_url' || /^data:/.test(part.image_url.url)) return part;
+        return { type: 'image_url', image_url: { url: await toDataUrl(part.image_url.url) } };
+      }));
+    }
+    var body = JSON.stringify({ model: cfg.gemModel, temperature: 0.1, reasoning_effort: 'low', messages: [{ role: 'user', content: content }] });
+    for (var attempt = 0; ; attempt++) {
+      var r = await gmRequest({
+        method: 'POST', url: GEMINI_URL,
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + cfg.gemKey },
+        data: body
+      });
+      var json = null;
+      try { json = JSON.parse(r.responseText); } catch (e) {}
+      if ((r.status === 429 || r.status >= 500) && attempt < 3) { await sleep(5000 * (attempt + 1)); continue; }
+      var err = json && (json.error || (Array.isArray(json) && json[0] && json[0].error));
+      if (r.status >= 400 || !json || !json.choices) throw new Error('Gemini 接口出错：' + ((err && err.message) || ('HTTP ' + r.status)));
+      var text = (json.choices[0] && json.choices[0].message && json.choices[0].message.content) || '';
+      var m = text.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error('Gemini 没有返回 JSON');
+      return JSON.parse(m[0]);
+    }
   }
 
   function download(url, name) {
@@ -1151,7 +1168,7 @@ const COLLECTOR_BODY = String.raw`
     var content = cfg.aiVision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: item.imageUrl } }]
       : prompt;
-    var r = await doubao(content);
+    var r = await askAi(content);
     var bad = r.violation ? '违规内容' : r.ipRisk ? 'IP/品牌侵权风险' : null;
     if (!bad && r.wrongType) bad = '品类不对，不是' + c.name;
     if (!bad && cfg.category === 'cotton' && r.washed && cfg.aiVision) bad = '是水洗T，不是纯棉T';
@@ -1369,7 +1386,7 @@ const COLLECTOR_BODY = String.raw`
     }
     if (cfg.useAi && cfg.aiCheck) {
       var bad = await aiCheck(item);
-      if (bad) { markSkipped(item, '豆包：' + bad); return false; }
+      if (bad) { markSkipped(item, 'Gemini：' + bad); return false; }
     }
     var fabricBad = fabricColorBad(info, ctx);
     if (fabricBad) { markSkipped(item, fabricBad); return false; }
@@ -1417,7 +1434,7 @@ const COLLECTOR_BODY = String.raw`
         stats.failed++;
         bump('failed');
         log('失败 ' + item.goodsId + '：' + e.message, true);
-        if (/请先|豆包接口/.test(e.message)) { queue.length = 0; pause(); }
+        if (/请先|Gemini 接口/.test(e.message)) { queue.length = 0; pause(); }
       }
       render();
     }
@@ -1709,7 +1726,7 @@ const COLLECTOR_BODY = String.raw`
   }
 
   // ---------- multi-page job (survives page navigation, across platforms) ----------
-  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.44.0';
+  var SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '6.45.0';
   var JOB_VERSION = 4;
   function getJob() { return GM_getValue('job', null); }
   function setJob(j) { GM_setValue('job', j); }
@@ -2067,7 +2084,7 @@ const COLLECTOR_BODY = String.raw`
     if (s.lang === '繁体中文') return !/[\u4e00-\u9fff]/.test(kw);
     return true;
   }
-  // Offline fallback so Chinese keywords still work on English sites without a 豆包 key.
+  // Offline fallback so Chinese keywords still work on English sites without a Gemini key.
   var ZH_EN = [
     ['纯白色', 'white'], ['纯黑色', 'black'], ['黑色', 'black'], ['白色', 'white'], ['黑', 'black'], ['白', 'white'],
     ['短袖', 'short sleeve'], ['长袖', 'long sleeve'], ['圆领', 'crew neck'], ['宽松', 'oversized'], ['纯棉', 'cotton'],
@@ -2095,11 +2112,11 @@ const COLLECTOR_BODY = String.raw`
       else if (!miss.some(function (m) { return m.lang + '|' + m.kw === key; })) miss.push(p);
     });
     if (!miss.length || !cfg.kwTranslate) return out;
-    if (!cfg.useAi) { log('豆包已关闭，关键词不翻译，外语站点直接用原词搜索'); return out; }
-    if (!cfg.arkKey) { log('没填豆包 API Key，关键词不会自动翻译，外语站点会直接用原词搜索', true); return out; }
-    log('正在用豆包把 ' + miss.length + ' 个关键词翻译成各站点语言…');
+    if (!cfg.useAi) { log('Gemini已关闭，关键词不翻译，外语站点直接用原词搜索'); return out; }
+    if (!cfg.gemKey) { log('没填Gemini API Key，关键词不会自动翻译，外语站点会直接用原词搜索', true); return out; }
+    log('正在用Gemini把 ' + miss.length + ' 个关键词翻译成各站点语言…');
     try {
-      var r = await doubao('把下面的电商搜索关键词翻译成指定语言。要求：译成当地买家在 Temu / Amazon 搜索框里真实会输入的简短说法，保留颜色、印花/图案、服饰品类（T 恤 / 水洗做旧 T 恤 / 棉马甲 / 棉服外套）、男女含义，水洗/acid wash 不能译成普通 T 恤；不要加品牌、引号、解释；已经是该语言的原样返回。\n' +
+      var r = await askAi('把下面的电商搜索关键词翻译成指定语言。要求：译成当地买家在 Temu / Amazon 搜索框里真实会输入的简短说法，保留颜色、印花/图案、服饰品类（T 恤 / 水洗做旧 T 恤 / 棉马甲 / 棉服外套）、男女含义，水洗/acid wash 不能译成普通 T 恤；不要加品牌、引号、解释；已经是该语言的原样返回。\n' +
         miss.map(function (p, i) { return i + '. [' + p.lang + '] ' + p.kw; }).join('\n') +
         '\n只返回 JSON：{"items":[{"i":序号,"t":"译文"}]}');
       (r.items || []).forEach(function (it) {
@@ -2290,8 +2307,8 @@ const COLLECTOR_BODY = String.raw`
 
   async function genKeywords() {
     var men = cfg.gender === 'men', scope = platOf(cfg.kwScope), pname = PNAMES[scope], have = siteKws(scope);
-    log('正在让豆包为 ' + pname + ' 想更多关键词（搜索时会自动翻译成各国语言）…');
-    var r = await doubao('我做跨境电商，在 ' + pname + ' 上要搜索' + (men ? '男士' : '女士') + cat().zh + '的爆款图案。我已有这些关键词：' + have.join('；') +
+    log('正在让Gemini为 ' + pname + ' 想更多关键词（搜索时会自动翻译成各国语言）…');
+    var r = await askAi('我做跨境电商，在 ' + pname + ' 上要搜索' + (men ? '男士' : '女士') + cat().zh + '的爆款图案。我已有这些关键词：' + have.join('；') +
       '。请再给 5 个买家真实会在搜索框输入的英文关键词，彼此说法不同，都要表达「' + cat().zh + ' + ' + (men ? '男' : '女') + '」，必须带具体图案主题，不要纯色/素色/plain/solid/blank，不要品牌、IP、儿童' + (cat().tee ? '、长袖、卫衣' : '') + (cfg.category === 'cotton' ? '、水洗/acid wash/vintage wash' : '') + '。只返回 JSON：{"keywords":["..."]}');
     var list = splitKeywords(have.concat(r.keywords || []).join('\n'));
     setScopeKws(scope, list.join('\n'));
@@ -2407,13 +2424,13 @@ const COLLECTOR_BODY = String.raw`
 
   async function recommendSites() {
     var list = SITES.map(function (s) { return s.id + '=' + siteLabel(s); }).join('，');
-    log('正在问豆包哪些平台和国家黑色印花 T 恤卖得好…');
-    var r = await doubao('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的平台和国家站点采集爆款图案。请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
+    log('正在问Gemini哪些平台和国家黑色印花 T 恤卖得好…');
+    var r = await askAi('我做跨境电商，卖' + (cfg.gender === 'men' ? '男士' : '女士') + '黑色印花短袖 T 恤，想去销量高的平台和国家站点采集爆款图案。请从这些站点里推荐 5-8 个黑色印花 T 恤需求最大的：' + list + '。只返回 JSON：{"sites":["站点代码"],"reason":"一句话中文原因"}');
     var ids = (r.sites || r.countries || []).map(function (x) { return String(x).toLowerCase(); });
     SITES.forEach(function (s) { cfg.sites[s.id].on = ids.indexOf(s.id) >= 0; });
     if (!ids.some(function (id) { return cfg.sites[id]; })) cfg.sites['temu-us'].on = true;
     save(); syncSites();
-    log('豆包推荐：' + ids.filter(function (id) { return cfg.sites[id]; }).map(function (id) { return siteLabel(siteBy(id)); }).join('、') + (r.reason ? '。' + r.reason : ''));
+    log('Gemini推荐：' + ids.filter(function (id) { return cfg.sites[id]; }).map(function (id) { return siteLabel(siteBy(id)); }).join('、') + (r.reason ? '。' + r.reason : ''));
   }
   function localDay(iso) {
     var t = new Date(iso);
@@ -2466,7 +2483,7 @@ const COLLECTOR_BODY = String.raw`
         '<button data-k="min" aria-label="收起" style="background:none;border:0;color:' + C.dim + ';cursor:pointer;font-size:16px">–</button>' +
       '</span></div>' +
     '<div data-k="body" style="flex:1;min-height:0;display:flex;flex-direction:column">' +
-      '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '站点') + tabBtn('filter', '过滤') + tabBtn('auto', '自动') + tabBtn('api', '豆包/去重') + '</div>' +
+      '<div style="display:flex;margin-bottom:10px;border-bottom:1px solid ' + C.line + '">' + tabBtn('main', '采集') + tabBtn('country', '站点') + tabBtn('filter', '过滤') + tabBtn('auto', '自动') + tabBtn('api', 'AI/去重') + '</div>' +
       '<div data-k="scroll" style="flex:1;min-height:0;overflow:auto;padding-right:2px">' +
         '<div data-pane="main">' +
           row(field('最低销量/评价数', input('minSales', 'type="number" min="1"')), field('每次搜索采集', input('target', 'type="number" min="1"'))) +
@@ -2489,8 +2506,8 @@ const COLLECTOR_BODY = String.raw`
             platList().map(function (p) { return '<option value="' + p + '">' + PNAMES[p] + '</option>'; }).join('') + '</select>') +
           field('该网站关键词（每行一个，依次轮询搜索）', '<textarea data-k="myKeywords" rows="4" style="' + inputCss + ';resize:vertical"></textarea>') +
           '<div data-k="kwScopeInfo" style="font-size:11px;color:' + C.dim + ';margin:-4px 0 8px"></div>' +
-          check('kwTranslate', '搜索前自动把关键词翻译成该站点当地语言再搜索（用豆包）') +
-          '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="genKw" style="' + btnCss + '">豆包帮我想更多词</button><button data-k="previewKw" style="' + btnCss + '">预览各站搜索词</button></div>' +
+          check('kwTranslate', '搜索前自动把关键词翻译成该站点当地语言再搜索（用Gemini）') +
+          '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="genKw" style="' + btnCss + '">Gemini帮我想更多词</button><button data-k="previewKw" style="' + btnCss + '">预览各站搜索词</button></div>' +
           '<div style="display:flex;gap:6px;margin-bottom:8px"><button data-k="copyKw" style="' + btnCss + '">复制到其他网站</button></div>' +
           '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
             '<select data-k="kwRandColor" style="' + inputCss + ';flex:1"><option value="both">黑白各半</option><option value="black">只要黑 T</option><option value="white">只要白 T</option></select>' +
@@ -2500,11 +2517,11 @@ const COLLECTOR_BODY = String.raw`
           check('kwAutoRand', '每次「开始多站点采集」前自动追加一批新随机词') +
           check('autoPick', '勾选站点后自动打开该站并输入关键词开始采集') +
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span data-k="kwHistInfo" style="font-size:11px;opacity:.7"></span><button data-k="clearKwHist" style="' + linkCss + ';font-size:11px">清空生成记录</button></div>' +
-          hint('随机词在本地组合（颜色 + 主题 + 印花 + T 恤 + 男女），不花灵豆也不花豆包费用；所有生成过的词都会记录，词序不同也算重复，永远不会再生成同一个词。') +
+          hint('随机词在本地组合（颜色 + 主题 + 印花 + T 恤 + 男女），不花灵豆也不花Gemini费用；所有生成过的词都会记录，词序不同也算重复，永远不会再生成同一个词。') +
           hint('翻译结果会缓存，同一个词只翻译一次。下面勾选要采集的站点，不勾就不采；跨平台会自动跳转，请先在这个浏览器里登录这些网站。') +
           '<div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button data-k="noneAll" style="' + linkCss + ';font-size:11px">取消全部站点</button></div>' +
           siteRows +
-          '<button data-k="recommend" style="' + btnCss + ';width:100%;margin-top:4px">问豆包：黑 T 在哪些平台/国家卖得多</button>' +
+          '<button data-k="recommend" style="' + btnCss + ';width:100%;margin-top:4px">问Gemini：黑 T 在哪些平台/国家卖得多</button>' +
         '</div>' +
         '<div data-pane="auto" style="display:none">' +
           field('定时开工（多个用逗号隔开，如 09:00,20:00）', input('schedule', 'placeholder="留空 = 不定时"')) +
@@ -2526,7 +2543,7 @@ const COLLECTOR_BODY = String.raw`
           check('printOne', '单个印花（只有前面或只有后面一个印花）') +
           check('printTwo', '两个印花（前 + 后，或 一面 + 袖子）') +
           check('printMulti', '多印花（3 个及以上，如后背 + 左右袖）') +
-          hint('正面、背面、左袖、右袖各算一个印花面，用豆包看图判断。都不勾 = 不限。') +
+          hint('正面、背面、左袖、右袖各算一个印花面，用Gemini看图判断。都不勾 = 不限。') +
           check('pixelCheck', '检测图片：颜色不对 / 印花太满的不要') +
           row(field('黑色占比下限 %', input('darkMin', 'type="number" min="5" max="95"')), field('白色占比下限 %', input('lightMin', 'type="number" min="5" max="95"'))) +
           field('跳过词（标题出现就不采）', '<textarea data-k="skipWords" rows="5" style="' + inputCss + ';resize:vertical"></textarea>') +
@@ -2535,13 +2552,13 @@ const COLLECTOR_BODY = String.raw`
           '<button data-k="resetWords" style="' + linkCss + '">恢复默认词库</button>' +
         '</div>' +
         '<div data-pane="api" style="display:none">' +
-          '<div style="margin-bottom:6px"><strong>豆包审核</strong></div>' +
-          check('useAi', '启用豆包（总开关）') +
-          hint('不勾选＝所有功能都不用豆包：不审核、不翻译关键词、「豆包帮我想更多词」和「推荐站点」也停用，不产生任何豆包费用。随机生成关键词、像素颜色判断、去重照常工作。') +
-          field('豆包 API Key（火山方舟）', input('arkKey', 'type="password"')) +
-          field('模型 / 接入点 ID', input('arkModel')) +
-          hint('填文字/看图模型，如 doubao-seed-2-0-pro、doubao-seed-2-0-lite。Seedance 2.0（视频）和 Seedream（画图）不能用于审核和翻译，填了会自动改回。') +
-          check('aiCheck', '用豆包审核每个商品（违规 / IP 侵权）') +
+          '<div style="margin-bottom:6px"><strong>Gemini审核</strong></div>' +
+          check('useAi', '启用Gemini（总开关）') +
+          hint('不勾选＝所有功能都不用Gemini：不审核、不翻译关键词、「Gemini帮我想更多词」和「推荐站点」也停用，不产生任何Gemini费用。随机生成关键词、像素颜色判断、去重照常工作。') +
+          field('Gemini API Key（Google AI Studio）', input('gemKey', 'type="password"')) +
+          field('模型 / 接入点 ID', input('gemModel')) +
+          hint('在 aistudio.google.com/apikey 免费创建 Key。模型推荐 gemini-4-hydrogen（准）；想更省钱可填 gemini-3.5-flash-lite。画图/语音/视频模型不能用，填了会自动改回。') +
+          check('aiCheck', '用Gemini审核每个商品（违规 / IP 侵权）') +
           check('aiVision', '审核时看图（双面 / 满印 / 颜色）') +
           '<div style="border-top:1px solid ' + C.line + ';margin:8px 0;padding-top:8px"><strong>采集同步（灵图插件 Alt+1）</strong></div>' +
           field('审核通过后', '<select data-k="handoff" style="' + inputCss + '"><option value="alt1">自动按 Alt+1 采集并同步（推荐）</option><option value="click">自动点「采集并同步」按钮</option><option value="mark">只标绿框，我自己按 Alt+1</option></select>') +
@@ -2634,7 +2651,7 @@ const COLLECTOR_BODY = String.raw`
     host.querySelectorAll('[data-tab]').forEach(function (b) { b.style.borderBottomColor = b.getAttribute('data-tab') === k ? C.blue : 'transparent'; });
   }
   host.querySelectorAll('[data-tab]').forEach(function (b) { b.onclick = function () { showTab(b.getAttribute('data-tab')); }; });
-  showTab(cfg.arkKey || !cfg.aiCheck || !cfg.useAi ? 'main' : 'api');
+  showTab(cfg.gemKey || !cfg.aiCheck || !cfg.useAi ? 'main' : 'api');
 
   function syncCounts() {
     Object.keys(PLATFORMS).forEach(function (p) {
@@ -2678,7 +2695,7 @@ const COLLECTOR_BODY = String.raw`
   $('previewKw').onclick = function () { previewKeywords().catch(function (e) { log(e.message, true); }); };
   $('copyKw').onclick = copyScopeToOthers;
 
-  ['arkKey', 'arkModel', 'skipWords', 'removeWords', 'mustWords', 'handoff', 'schedule', 'reportTime', 'pushType', 'pushKey', 'colorMode'].forEach(function (k) {
+  ['gemKey', 'gemModel', 'skipWords', 'removeWords', 'mustWords', 'handoff', 'schedule', 'reportTime', 'pushType', 'pushKey', 'colorMode'].forEach(function (k) {
     $(k).value = cfg[k];
     $(k).onchange = function () {
       var v = $(k).value.trim();
@@ -2698,7 +2715,7 @@ const COLLECTOR_BODY = String.raw`
     $(k).onchange = function () { cfg[k] = $(k).checked; save(); };
   });
   function applyAiState() {
-    ['aiCheck', 'aiVision', 'kwTranslate', 'genKw', 'recommend', 'arkKey', 'arkModel'].forEach(function (k) {
+    ['aiCheck', 'aiVision', 'kwTranslate', 'genKw', 'recommend', 'gemKey', 'gemModel'].forEach(function (k) {
       var el = $(k);
       if (!el) return;
       el.disabled = !cfg.useAi;
@@ -2711,7 +2728,7 @@ const COLLECTOR_BODY = String.raw`
     cfg.useAi = $('useAi').checked;
     save();
     applyAiState();
-    log(cfg.useAi ? '已启用豆包' : '已关闭豆包：审核、翻译、想词、推荐站点全部不调用豆包');
+    log(cfg.useAi ? '已启用Gemini' : '已关闭Gemini：审核、翻译、想词、推荐站点全部不调用Gemini');
   };
   applyAiState();
   $('gender').value = cfg.gender;
@@ -2768,7 +2785,7 @@ const COLLECTOR_BODY = String.raw`
     grip.addEventListener('dblclick', function () { GM_setValue('panelSize', null); apply(null); });
   })();
   $('clear').onclick = function () {
-    if (!confirm('之前被审核跳过的商品会重新审核（会再用豆包），已同步到灵图的仍然不会重复。确定吗？')) return;
+    if (!confirm('之前被审核跳过的商品会重新审核（会再用Gemini），已同步到灵图的仍然不会重复。确定吗？')) return;
     refreshSets();
     var keep = Array.from(done).filter(function (k) { return synced.has(k); });
     done = new Set(keep); GM_setValue('done', keep);
@@ -2841,7 +2858,7 @@ const COLLECTOR_BODY = String.raw`
   $('recommend').onclick = function () { recommendSites().catch(function (e) { log(e.message, true); }); };
 
   function preflight() {
-    if (cfg.useAi && cfg.aiCheck && !cfg.arkKey) { showTab('api'); log('开了豆包审核，请先填写豆包 API Key', true); return false; }
+    if (cfg.useAi && cfg.aiCheck && !cfg.gemKey) { showTab('api'); log('开了Gemini审核，请先填写Gemini API Key', true); return false; }
     return true;
   }
   var starting = false;
@@ -2932,7 +2949,7 @@ const COLLECTOR_BODY = String.raw`
 
   compileRules();
   render();
-  log('就绪 v' + SCRIPT_VERSION + (cfg.useAi ? '' : ' · 豆包已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
+  log('就绪 v' + SCRIPT_VERSION + (cfg.useAi ? '' : ' · Gemini已关闭') + ' · 当前站点：' + siteLabel(currentSite()) + (isStorePage() ? '（店铺页）' : isGoodsPage() ? '（商品页）' : ''));
   if (getJob()) setTimeout(runJob, 2500);
 
   // Desktop app: the panel is rendered natively by the exe, so keep it off-page and mirror it over IPC.
@@ -3016,7 +3033,7 @@ export function buildUserscript() {
     '// @name         Temu 爆款图案采集 → 灵图',
     '// @namespace    temu-lingtu-collector',
     '// @version      6.44.0',
-    '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，豆包审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
+    '// @description  多平台（Temu / SHEIN / Etsy / Amazon / Shopee / Lazada / 速卖通）多国家筛选高销量黑色 T 恤，Gemini审核违规/IP/双面/满印，通过的自动点灵图插件「采集并同步」',
     ...matches.map((m) => '// @match        ' + m),
     '// @include      /^https?:\\/\\/([^/]+\\.)?shein\\.[a-z.]+\\/.*$/',
     '// @grant        GM_xmlhttpRequest',
